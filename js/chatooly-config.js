@@ -6,7 +6,7 @@
 // ========== EDIT THIS: Chatooly Configuration ==========
 window.ChatoolyConfig = {
     // REQUIRED: Your tool name
-    name: "3d-typeshaper",
+    name: "*DGA*: 3D Type Shaper",
 
     // OPTIONAL: Export settings
     resolution: 2,              // 1, 2, or 4
@@ -17,5 +17,6 @@ window.ChatoolyConfig = {
     tags: ["text", "shapes", "generative", "design", "typography", "3d"],         // Add relevant tags e.g., ["creative", "interactive", "design"]
     description: "Convert text into letters made of geometric shapes — dots, lines, or circles",  // Brief description of what your tool does
     version: "1.0.0",
-    author: ""        // Your name or handle (update this)
+    author: "Yael Renous - Studio Video",
+    publishTarget: "chatooly"  // "chatooly" (Studio Video Tool Hub) or "designers" (Designers Tool Hub)
 };

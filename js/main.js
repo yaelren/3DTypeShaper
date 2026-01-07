@@ -40,8 +40,39 @@ let textData = {
     spacing: 1.0,
 
     // Material settings
-    materialMode: 'matcap',  // 'matcap' or 'solid'
+    materialType: 'solid',  // 'solid', 'matcapUpload', 'gradient'
+    materialMode: 'matcap',  // legacy: 'matcap' or 'solid'
     shapeColor: '#4a90d9',
+
+    // Gradient shader settings (from 3D Trail)
+    gradientSets: [{
+        name: 'Gradient 1',
+        stops: [
+            { color: '#ff6b6b', position: 0 },
+            { color: '#4ecdc4', position: 50 },
+            { color: '#45b7d1', position: 100 }
+        ],
+        type: 'radial'  // 'radial' or 'linear'
+    }],
+    activeGradientIndex: 0,
+    lightPosition: 0.5,
+    lightIntensity: 1.0,
+    lightColor: '#ffffff',
+    rimEnabled: true,
+    rimColor: '#ffffff',
+    rimIntensity: 0.5,
+    shaderMode: 'reflective',  // 'reflective' or 'toon'
+
+    // Facing behavior (for GLB models)
+    facingMode: 'billboard',  // 'billboard', 'random', 'fixed'
+    fixedAngleX: 0,
+    fixedAngleY: 0,
+    fixedAngleZ: 0,
+
+    // GLB Animation
+    glbAnimationType: 'none',  // 'none', 'rotate', 'tumble', 'lookAtMouse'
+    rotateSpeed: 1.0,
+    tumbleSpeed: 1.0,
 
     // Animation
     isAnimating: false,
@@ -81,6 +112,27 @@ let traceIndex = 0;
 
 // Matcap texture
 let matcapTexture = null;
+
+// Custom uploaded matcap texture
+let uploadedMatcapTexture = null;
+
+// MatCap generator instance
+let matcapGenerator = null;
+
+// Gradient material
+let gradientMaterial = null;
+
+// Per-particle rotation data (for facing behavior and animation)
+let particleRotations = [];
+
+// GLB animation frame ID
+let glbAnimationFrameId = null;
+
+// Clock for delta time
+let clock = null;
+
+// Mouse world position (for lookAtMouse)
+let mouseWorldPos = null;
 
 // ========== THREE.JS INITIALIZATION ==========
 function init() {
@@ -129,8 +181,19 @@ function init() {
     // Initialize dummy object for matrix calculations
     dummy = new THREE.Object3D();
 
+    // Initialize clock for delta time
+    clock = new THREE.Clock();
+
+    // Initialize mouse world position
+    mouseWorldPos = new THREE.Vector3();
+
     // Create default matcap texture (gradient sphere look)
     createDefaultMatcap();
+
+    // Initialize MatCap generator for gradient materials
+    if (window.MatCapGenerator) {
+        matcapGenerator = new MatCapGenerator(256);
+    }
 
     // Setup event listeners
     setupEventListeners();
@@ -417,18 +480,192 @@ function createShapeGeometry(shapeType) {
 function createMaterial(mode, color) {
     const THREE = window.THREE;
 
-    if (mode === 'matcap' && matcapTexture) {
-        return new THREE.MeshMatcapMaterial({
-            matcap: matcapTexture,
-            color: new THREE.Color(color)
-        });
-    } else {
+    // Use new material type system
+    switch (textData.materialType) {
+        case 'solid':
+            return new THREE.MeshStandardMaterial({
+                color: new THREE.Color(color),
+                metalness: 0.3,
+                roughness: 0.7
+            });
+
+        case 'matcapUpload':
+            if (uploadedMatcapTexture) {
+                return new THREE.MeshMatcapMaterial({
+                    matcap: uploadedMatcapTexture
+                });
+            }
+            // Fallback to solid if no texture uploaded
+            return new THREE.MeshStandardMaterial({
+                color: new THREE.Color(color),
+                metalness: 0.3,
+                roughness: 0.7
+            });
+
+        case 'gradient':
+            return createGradientMaterial();
+
+        default:
+            // Legacy support
+            if (mode === 'matcap' && matcapTexture) {
+                return new THREE.MeshMatcapMaterial({
+                    matcap: matcapTexture,
+                    color: new THREE.Color(color)
+                });
+            } else {
+                return new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(color),
+                    metalness: 0.3,
+                    roughness: 0.7
+                });
+            }
+    }
+}
+
+// ========== GRADIENT SHADER MATERIAL ==========
+function createGradientMaterial() {
+    const THREE = window.THREE;
+
+    if (!matcapGenerator) {
+        // Fallback if generator not available
         return new THREE.MeshStandardMaterial({
-            color: new THREE.Color(color),
+            color: new THREE.Color(textData.shapeColor),
             metalness: 0.3,
             roughness: 0.7
         });
     }
+
+    const currentGradient = textData.gradientSets[textData.activeGradientIndex] || textData.gradientSets[0];
+
+    // Generate matcap texture from gradient
+    const texture = matcapGenerator.generate(
+        currentGradient.stops,
+        currentGradient.type,
+        textData.lightPosition
+    );
+
+    const material = new THREE.MeshMatcapMaterial({
+        matcap: texture,
+        side: THREE.DoubleSide,
+        flatShading: textData.shaderMode === 'toon'
+    });
+
+    // Extend with rim light via onBeforeCompile
+    material.onBeforeCompile = (shader) => {
+        shader.uniforms.rimColor = { value: new THREE.Color(textData.rimColor) };
+        shader.uniforms.rimIntensity = { value: textData.rimEnabled ? textData.rimIntensity : 0 };
+        shader.uniforms.lightColor = { value: new THREE.Color(textData.lightColor) };
+        shader.uniforms.lightIntensity = { value: textData.lightIntensity };
+        shader.uniforms.toonMode = { value: textData.shaderMode === 'toon' ? 1 : 0 };
+
+        // Inject uniforms after #include <common>
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            `#include <common>
+            uniform vec3 rimColor;
+            uniform float rimIntensity;
+            uniform vec3 lightColor;
+            uniform float lightIntensity;
+            uniform int toonMode;`
+        );
+
+        // Add rim light + toon effect before opaque_fragment
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <opaque_fragment>',
+            `// Apply light color and intensity
+            outgoingLight *= lightColor * lightIntensity;
+
+            // Toon posterization
+            if (toonMode == 1) {
+                outgoingLight = floor(outgoingLight * 4.0) / 4.0;
+            }
+
+            // Rim light (Fresnel effect)
+            vec3 rimViewDir = normalize(vViewPosition);
+            float rimFactor = 1.0 - max(0.0, dot(normal, rimViewDir));
+            rimFactor = pow(rimFactor, 2.0);
+            outgoingLight += rimColor * rimFactor * rimIntensity;
+
+            #include <opaque_fragment>`
+        );
+
+        // Store reference for uniform updates
+        material.userData.shader = shader;
+    };
+
+    gradientMaterial = material;
+    return material;
+}
+
+// ========== UPDATE GRADIENT MATERIAL ==========
+function updateGradientMaterial() {
+    if (textData.materialType !== 'gradient' || !gradientMaterial || !matcapGenerator) return;
+
+    const THREE = window.THREE;
+    const currentGradient = textData.gradientSets[textData.activeGradientIndex] || textData.gradientSets[0];
+
+    // Regenerate matcap texture
+    const texture = matcapGenerator.generate(
+        currentGradient.stops,
+        currentGradient.type,
+        textData.lightPosition
+    );
+
+    // Update material
+    if (gradientMaterial.matcap) {
+        gradientMaterial.matcap.dispose();
+    }
+    gradientMaterial.matcap = texture;
+    gradientMaterial.flatShading = textData.shaderMode === 'toon';
+    gradientMaterial.needsUpdate = true;
+
+    // Update uniforms if shader compiled
+    if (gradientMaterial.userData.shader) {
+        const uniforms = gradientMaterial.userData.shader.uniforms;
+        uniforms.rimColor.value.set(textData.rimColor);
+        uniforms.rimIntensity.value = textData.rimEnabled ? textData.rimIntensity : 0;
+        uniforms.lightColor.value.set(textData.lightColor);
+        uniforms.lightIntensity.value = textData.lightIntensity;
+        uniforms.toonMode.value = textData.shaderMode === 'toon' ? 1 : 0;
+    }
+
+    render();
+}
+
+// ========== CUSTOM MATCAP UPLOAD HANDLER ==========
+function handleMatcapUpload(file) {
+    const THREE = window.THREE;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        const image = new Image();
+        image.onload = () => {
+            // Dispose old texture
+            if (uploadedMatcapTexture) {
+                uploadedMatcapTexture.dispose();
+            }
+
+            // Create new texture
+            uploadedMatcapTexture = new THREE.Texture(image);
+            uploadedMatcapTexture.needsUpdate = true;
+
+            // Rebuild if matcapUpload is active
+            if (textData.materialType === 'matcapUpload') {
+                rebuildParticleSystem();
+            }
+        };
+        image.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+// ========== GENERATE MATCAP PREVIEW ==========
+function generateMatcapPreview(stops, type) {
+    if (!matcapGenerator) return null;
+
+    // Generate texture and return the canvas for preview
+    matcapGenerator.generate(stops, type, textData.lightPosition);
+    return matcapGenerator.getPreviewCanvas();
 }
 
 // ========== PARTICLE SYSTEM ==========
@@ -473,7 +710,7 @@ function rebuildParticleSystem() {
     );
     instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
-    // Store particle positions
+    // Store particle positions and initialize rotations
     particlePositions = cachedPoints.map(p => ({
         x: p.x,
         y: p.y,
@@ -481,20 +718,66 @@ function rebuildParticleSystem() {
         baseScale: 1.0
     }));
 
+    // Initialize per-particle rotation data (for GLB facing/animation)
+    particleRotations = cachedPoints.map(() => {
+        const rot = {
+            x: 0,
+            y: 0,
+            z: 0,
+            // Angular velocity for tumble animation
+            angularVelocityX: (Math.random() - 0.5) * 4 * textData.tumbleSpeed,
+            angularVelocityY: (Math.random() - 0.5) * 4 * textData.tumbleSpeed,
+            angularVelocityZ: (Math.random() - 0.5) * 4 * textData.tumbleSpeed,
+            // Accumulated spin offset
+            spinOffsetX: 0,
+            spinOffsetY: 0,
+            spinOffsetZ: 0
+        };
+
+        // Set initial rotation based on facing mode (only for GLB)
+        if (textData.shapeType === 'glb') {
+            switch (textData.facingMode) {
+                case 'random':
+                    rot.x = Math.random() * Math.PI * 2;
+                    rot.y = Math.random() * Math.PI * 2;
+                    rot.z = Math.random() * Math.PI * 2;
+                    break;
+                case 'fixed':
+                    rot.x = THREE.MathUtils.degToRad(textData.fixedAngleX);
+                    rot.y = THREE.MathUtils.degToRad(textData.fixedAngleY);
+                    rot.z = THREE.MathUtils.degToRad(textData.fixedAngleZ);
+                    break;
+                case 'billboard':
+                default:
+                    // Will be calculated per-frame
+                    break;
+            }
+        }
+
+        return rot;
+    });
+
     // Update and add to scene
     updateInstancedMesh();
     scene.add(instancedMesh);
 
+    // Start GLB animation if needed
+    if (textData.shapeType === 'glb' && textData.glbAnimationType !== 'none') {
+        startGLBAnimation();
+    }
+
     render();
 }
 
-function updateInstancedMesh(rotationAngle = 0) {
+function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
     if (!instancedMesh || !dummy || particlePositions.length === 0) return;
 
     const THREE = window.THREE;
+    const isGLB = textData.shapeType === 'glb';
 
     for (let i = 0; i < particlePositions.length; i++) {
         const p = particlePositions[i];
+        const rot = particleRotations[i] || { x: 0, y: 0, z: 0 };
 
         // Calculate hover scale
         let scale = p.baseScale;
@@ -502,12 +785,44 @@ function updateInstancedMesh(rotationAngle = 0) {
             scale *= getHoverScale3D(p.x, p.y);
         }
 
-        // Set transform
+        // Set position
         dummy.position.set(p.x, p.y, p.z);
 
-        // Apply rotation with phase offset for variety
-        const phase = (i * 0.1) % (Math.PI * 2);
-        dummy.rotation.set(rotationAngle + phase, rotationAngle + phase, 0);
+        // Apply rotation based on shape type
+        if (isGLB) {
+            // GLB-specific rotation handling
+            let finalRotX = rot.x;
+            let finalRotY = rot.y;
+            let finalRotZ = rot.z;
+
+            // Apply facing mode
+            if (textData.facingMode === 'billboard') {
+                // Face camera (orthographic, so just reset to default)
+                finalRotX = 0;
+                finalRotY = 0;
+                finalRotZ = 0;
+            }
+
+            // Apply animation offsets
+            if (textData.glbAnimationType === 'rotate') {
+                finalRotY += rot.spinOffsetY;
+            } else if (textData.glbAnimationType === 'tumble') {
+                finalRotX += rot.spinOffsetX;
+                finalRotY += rot.spinOffsetY;
+                finalRotZ += rot.spinOffsetZ;
+            } else if (textData.glbAnimationType === 'lookAtMouse') {
+                // Apply look-at-mouse rotation (calculated elsewhere)
+                finalRotX = rot.x;
+                finalRotY = rot.y;
+                finalRotZ = rot.z;
+            }
+
+            dummy.rotation.set(finalRotX, finalRotY, finalRotZ);
+        } else {
+            // Original behavior for spheres/cubes
+            const phase = (i * 0.1) % (Math.PI * 2);
+            dummy.rotation.set(rotationAngle + phase, rotationAngle + phase, 0);
+        }
 
         dummy.scale.setScalar(textData.shapeSize * scale);
         dummy.updateMatrix();
@@ -516,6 +831,115 @@ function updateInstancedMesh(rotationAngle = 0) {
     }
 
     instancedMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ========== GLB ANIMATION SYSTEM ==========
+function startGLBAnimation() {
+    stopGLBAnimation();
+
+    if (textData.shapeType !== 'glb' || textData.glbAnimationType === 'none') return;
+
+    function glbAnimationLoop() {
+        if (textData.shapeType !== 'glb' || textData.glbAnimationType === 'none') {
+            glbAnimationFrameId = null;
+            return;
+        }
+
+        const delta = clock ? clock.getDelta() : 0.016;
+
+        // Update per-particle animation
+        for (let i = 0; i < particleRotations.length; i++) {
+            const rot = particleRotations[i];
+
+            switch (textData.glbAnimationType) {
+                case 'rotate':
+                    // Continuous Y-axis rotation
+                    rot.spinOffsetY += textData.rotateSpeed * delta;
+                    break;
+
+                case 'tumble':
+                    // Random tumbling on all axes
+                    rot.spinOffsetX += rot.angularVelocityX * delta;
+                    rot.spinOffsetY += rot.angularVelocityY * delta;
+                    rot.spinOffsetZ += rot.angularVelocityZ * delta;
+                    break;
+
+                case 'lookAtMouse':
+                    // Look at mouse with pitch/yaw
+                    updateLookAtMouse(i, rot, delta);
+                    break;
+            }
+        }
+
+        updateInstancedMesh(0, delta);
+        renderer.render(scene, camera);
+
+        glbAnimationFrameId = requestAnimationFrame(glbAnimationLoop);
+    }
+
+    // Reset clock
+    if (clock) clock.getDelta();
+
+    glbAnimationFrameId = requestAnimationFrame(glbAnimationLoop);
+}
+
+function stopGLBAnimation() {
+    if (glbAnimationFrameId) {
+        cancelAnimationFrame(glbAnimationFrameId);
+        glbAnimationFrameId = null;
+    }
+}
+
+function updateLookAtMouse(index, rot, delta) {
+    if (!mouseWorldPos || textData.mouseX === null || textData.mouseY === null) return;
+
+    const THREE = window.THREE;
+    const canvas = document.getElementById('chatooly-canvas');
+    const p = particlePositions[index];
+
+    // Convert mouse screen position to world coordinates
+    const mouseNDC = new THREE.Vector3(
+        (textData.mouseX / canvas.width) * 2 - 1,
+        -(textData.mouseY / canvas.height) * 2 + 1,
+        0
+    );
+    mouseNDC.unproject(camera);
+    mouseWorldPos.set(mouseNDC.x, mouseNDC.y, 0);
+
+    // Calculate direction to mouse
+    const toMouse = new THREE.Vector3(
+        mouseWorldPos.x - p.x,
+        mouseWorldPos.y - p.y,
+        0
+    );
+
+    const distance = toMouse.length();
+    if (distance < 0.01) return;
+
+    toMouse.normalize();
+
+    // Calculate target rotations (pitch/yaw like 3D Trail)
+    // Yaw (Y-axis rotation) - horizontal tracking
+    const targetRotY = Math.atan2(toMouse.x, 0.5) * 1.2;
+    // Pitch (X-axis rotation) - vertical tracking
+    const targetRotX = Math.atan2(-toMouse.y, 1) * 0.8;
+    // Roll (Z-axis rotation) - slight tilt based on horizontal offset
+    const targetRotZ = toMouse.x * 0.2;
+
+    // Clamp to prevent extreme angles
+    const maxAngleY = Math.PI / 2.5;  // ~72 degrees
+    const maxAngleX = Math.PI / 4;    // 45 degrees
+    const maxRoll = Math.PI / 10;     // 18 degrees
+
+    const clampedRotX = Math.max(-maxAngleX, Math.min(maxAngleX, targetRotX));
+    const clampedRotY = Math.max(-maxAngleY, Math.min(maxAngleY, targetRotY));
+    const clampedRotZ = Math.max(-maxRoll, Math.min(maxRoll, targetRotZ));
+
+    // Smooth lag factor
+    const lagFactor = 0.1;
+    rot.x += (clampedRotX - rot.x) * lagFactor;
+    rot.y += (clampedRotY - rot.y) * lagFactor;
+    rot.z += (clampedRotZ - rot.z) * lagFactor;
 }
 
 // ========== HOVER EFFECT ==========
@@ -707,6 +1131,42 @@ function clearGLBModel() {
     }
 }
 
+// ========== CLEAR CANVAS ==========
+function clearCanvas() {
+    // Stop any running animations
+    stopAnimation();
+    stopGLBAnimation();
+    if (window.stopHoverRendering) {
+        window.stopHoverRendering();
+    }
+
+    // Remove instanced mesh from scene
+    if (instancedMesh) {
+        scene.remove(instancedMesh);
+        if (instancedMesh.geometry) instancedMesh.geometry.dispose();
+        if (instancedMesh.material) instancedMesh.material.dispose();
+        instancedMesh = null;
+    }
+
+    // Clear cached data
+    cachedPoints = null;
+    particlePositions = [];
+    particleRotations = [];
+
+    // Reset text input
+    textData.text = '';
+    const textInput = document.getElementById('text-input');
+    if (textInput) {
+        textInput.value = '';
+    }
+
+    // Reset trace index
+    traceIndex = 0;
+
+    // Render empty scene
+    render();
+}
+
 // ========== RENDER ==========
 function render(rotationAngle = 0) {
     if (!renderer || !scene || !camera) return;
@@ -765,6 +1225,76 @@ function stopAnimation() {
             window.startHoverRendering();
         }
     }
+}
+
+// ========== GRADIENT CONTROLS HELPER FUNCTIONS ==========
+function setupGradientControls() {
+    const container = document.getElementById('gradient-stops-container');
+    if (!container) return;
+
+    // Set up listeners for each gradient stop
+    const gradientStops = container.querySelectorAll('.gradient-stop');
+    gradientStops.forEach((stopEl, index) => {
+        const colorInput = stopEl.querySelector('.gradient-stop-color');
+        const positionInput = stopEl.querySelector('.gradient-stop-position');
+        const valueSpan = stopEl.querySelector('.gradient-stop-value');
+
+        if (colorInput) {
+            colorInput.addEventListener('input', (e) => {
+                const currentGradient = textData.gradientSets[textData.activeGradientIndex];
+                if (currentGradient && currentGradient.stops[index]) {
+                    currentGradient.stops[index].color = e.target.value;
+                }
+                updateGradientPreview();
+                if (textData.materialType === 'gradient') {
+                    updateGradientMaterial();
+                }
+            });
+        }
+
+        if (positionInput) {
+            positionInput.addEventListener('input', (e) => {
+                const currentGradient = textData.gradientSets[textData.activeGradientIndex];
+                if (currentGradient && currentGradient.stops[index]) {
+                    currentGradient.stops[index].position = parseInt(e.target.value);
+                }
+                if (valueSpan) valueSpan.textContent = e.target.value + '%';
+                updateGradientPreview();
+                if (textData.materialType === 'gradient') {
+                    updateGradientMaterial();
+                }
+            });
+        }
+    });
+}
+
+function updateGradientPreview() {
+    const previewCanvas = document.getElementById('gradient-preview');
+    if (!previewCanvas || !matcapGenerator) return;
+
+    const currentGradient = textData.gradientSets[textData.activeGradientIndex];
+    if (!currentGradient) return;
+
+    // Generate the matcap texture
+    matcapGenerator.generate(
+        currentGradient.stops,
+        currentGradient.type,
+        textData.lightPosition
+    );
+
+    // Draw preview
+    const sourceCanvas = matcapGenerator.getPreviewCanvas();
+    const ctx = previewCanvas.getContext('2d');
+    ctx.clearRect(0, 0, 80, 80);
+
+    // Draw as circular preview
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(40, 40, 39, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(sourceCanvas, 0, 0, 80, 80);
+    ctx.restore();
 }
 
 // ========== EVENT LISTENERS ==========
@@ -864,26 +1394,289 @@ function setupEventListeners() {
     // Shape type
     const shapeTypeSelect = document.getElementById('shape-type');
     const glbUploadGroup = document.getElementById('glb-upload-group');
+    const glbFacingSection = document.getElementById('glb-facing-section');
+    const glbAnimationSection = document.getElementById('glb-animation-section');
 
     shapeTypeSelect.addEventListener('change', (e) => {
         textData.shapeType = e.target.value;
+        const isGLB = textData.shapeType === 'glb';
 
-        // Show/hide GLB upload
-        if (textData.shapeType === 'glb') {
-            if (glbUploadGroup) glbUploadGroup.style.display = 'block';
-        } else {
-            if (glbUploadGroup) glbUploadGroup.style.display = 'none';
+        // Show/hide GLB-specific sections
+        if (glbUploadGroup) glbUploadGroup.style.display = isGLB ? 'block' : 'none';
+        if (glbFacingSection) glbFacingSection.style.display = isGLB ? 'block' : 'none';
+        if (glbAnimationSection) glbAnimationSection.style.display = isGLB ? 'block' : 'none';
+
+        // Stop GLB animation if switching away from GLB
+        if (!isGLB) {
+            stopGLBAnimation();
         }
 
         rebuildParticleSystem();
     });
 
-    // Material mode
-    const materialModeSelect = document.getElementById('material-mode');
-    if (materialModeSelect) {
-        materialModeSelect.addEventListener('change', (e) => {
-            textData.materialMode = e.target.value;
+    // Material type (new)
+    const materialTypeSelect = document.getElementById('material-type');
+    const shapeColorGroup = document.getElementById('shape-color-group');
+    const matcapUploadGroupEl = document.getElementById('matcap-upload-group');
+    const gradientControlsGroup = document.getElementById('gradient-controls-group');
+
+    if (materialTypeSelect) {
+        materialTypeSelect.addEventListener('change', (e) => {
+            textData.materialType = e.target.value;
+
+            // Show/hide appropriate controls
+            if (shapeColorGroup) shapeColorGroup.style.display = textData.materialType === 'solid' ? 'block' : 'none';
+            if (matcapUploadGroupEl) matcapUploadGroupEl.style.display = textData.materialType === 'matcapUpload' ? 'block' : 'none';
+            if (gradientControlsGroup) gradientControlsGroup.style.display = textData.materialType === 'gradient' ? 'block' : 'none';
+
+            // Update gradient preview if switching to gradient
+            if (textData.materialType === 'gradient') {
+                updateGradientPreview();
+            }
+
             rebuildParticleSystem();
+        });
+    }
+
+    // Custom matcap upload
+    const matcapUploadInput = document.getElementById('matcap-upload');
+    const matcapPreviewContainer = document.getElementById('matcap-preview-container');
+    const matcapPreviewCanvas = document.getElementById('matcap-preview');
+
+    if (matcapUploadInput) {
+        matcapUploadInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            handleMatcapUpload(file);
+
+            // Show preview
+            if (matcapPreviewContainer && matcapPreviewCanvas) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const ctx = matcapPreviewCanvas.getContext('2d');
+                        ctx.clearRect(0, 0, 80, 80);
+                        ctx.beginPath();
+                        ctx.arc(40, 40, 39, 0, Math.PI * 2);
+                        ctx.closePath();
+                        ctx.clip();
+                        ctx.drawImage(img, 0, 0, 80, 80);
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+                matcapPreviewContainer.style.display = 'block';
+            }
+        });
+    }
+
+    // Gradient controls
+    setupGradientControls();
+
+    // Shader mode
+    const shaderModeSelect = document.getElementById('shader-mode');
+    if (shaderModeSelect) {
+        shaderModeSelect.addEventListener('change', (e) => {
+            textData.shaderMode = e.target.value;
+            if (textData.materialType === 'gradient') {
+                rebuildParticleSystem();
+            }
+        });
+    }
+
+    // Gradient type
+    const gradientTypeSelect = document.getElementById('gradient-type');
+    if (gradientTypeSelect) {
+        gradientTypeSelect.addEventListener('change', (e) => {
+            const currentGradient = textData.gradientSets[textData.activeGradientIndex];
+            if (currentGradient) {
+                currentGradient.type = e.target.value;
+            }
+            updateGradientPreview();
+            if (textData.materialType === 'gradient') {
+                updateGradientMaterial();
+            }
+        });
+    }
+
+    // Light position
+    const lightPositionInput = document.getElementById('light-position');
+    const lightPositionValue = document.getElementById('light-position-value');
+    if (lightPositionInput) {
+        lightPositionInput.addEventListener('input', (e) => {
+            textData.lightPosition = parseFloat(e.target.value);
+            if (lightPositionValue) lightPositionValue.textContent = textData.lightPosition.toFixed(2);
+            updateGradientPreview();
+            if (textData.materialType === 'gradient') {
+                updateGradientMaterial();
+            }
+        });
+    }
+
+    // Light intensity
+    const lightIntensityInput = document.getElementById('light-intensity');
+    const lightIntensityValue = document.getElementById('light-intensity-value');
+    if (lightIntensityInput) {
+        lightIntensityInput.addEventListener('input', (e) => {
+            textData.lightIntensity = parseFloat(e.target.value);
+            if (lightIntensityValue) lightIntensityValue.textContent = textData.lightIntensity.toFixed(1);
+            if (textData.materialType === 'gradient') {
+                updateGradientMaterial();
+            }
+        });
+    }
+
+    // Light color
+    const lightColorInput = document.getElementById('light-color');
+    if (lightColorInput) {
+        lightColorInput.addEventListener('input', (e) => {
+            textData.lightColor = e.target.value;
+            if (textData.materialType === 'gradient') {
+                updateGradientMaterial();
+            }
+        });
+    }
+
+    // Rim light toggle
+    const rimEnabledToggle = document.getElementById('rim-enabled');
+    const rimControlsGroup = document.getElementById('rim-controls-group');
+    if (rimEnabledToggle) {
+        rimEnabledToggle.addEventListener('toggle-change', (e) => {
+            textData.rimEnabled = e.detail.checked;
+            if (rimControlsGroup) rimControlsGroup.style.display = textData.rimEnabled ? 'block' : 'none';
+            if (textData.materialType === 'gradient') {
+                updateGradientMaterial();
+            }
+        });
+    }
+
+    // Rim color
+    const rimColorInput = document.getElementById('rim-color');
+    if (rimColorInput) {
+        rimColorInput.addEventListener('input', (e) => {
+            textData.rimColor = e.target.value;
+            if (textData.materialType === 'gradient') {
+                updateGradientMaterial();
+            }
+        });
+    }
+
+    // Rim intensity
+    const rimIntensityInput = document.getElementById('rim-intensity');
+    const rimIntensityValue = document.getElementById('rim-intensity-value');
+    if (rimIntensityInput) {
+        rimIntensityInput.addEventListener('input', (e) => {
+            textData.rimIntensity = parseFloat(e.target.value);
+            if (rimIntensityValue) rimIntensityValue.textContent = textData.rimIntensity.toFixed(1);
+            if (textData.materialType === 'gradient') {
+                updateGradientMaterial();
+            }
+        });
+    }
+
+    // ========== GLB FACING CONTROLS ==========
+    const facingModeSelect = document.getElementById('facing-mode');
+    const fixedAngleControls = document.getElementById('fixed-angle-controls');
+
+    if (facingModeSelect) {
+        facingModeSelect.addEventListener('change', (e) => {
+            textData.facingMode = e.target.value;
+            if (fixedAngleControls) {
+                fixedAngleControls.style.display = textData.facingMode === 'fixed' ? 'block' : 'none';
+            }
+            rebuildParticleSystem();
+        });
+    }
+
+    // Fixed angle X
+    const angleXInput = document.getElementById('angle-x');
+    const angleXValue = document.getElementById('angle-x-value');
+    if (angleXInput) {
+        angleXInput.addEventListener('input', (e) => {
+            textData.fixedAngleX = parseInt(e.target.value);
+            if (angleXValue) angleXValue.textContent = textData.fixedAngleX;
+            if (textData.facingMode === 'fixed') {
+                rebuildParticleSystem();
+            }
+        });
+    }
+
+    // Fixed angle Y
+    const angleYInput = document.getElementById('angle-y');
+    const angleYValue = document.getElementById('angle-y-value');
+    if (angleYInput) {
+        angleYInput.addEventListener('input', (e) => {
+            textData.fixedAngleY = parseInt(e.target.value);
+            if (angleYValue) angleYValue.textContent = textData.fixedAngleY;
+            if (textData.facingMode === 'fixed') {
+                rebuildParticleSystem();
+            }
+        });
+    }
+
+    // Fixed angle Z
+    const angleZInput = document.getElementById('angle-z');
+    const angleZValue = document.getElementById('angle-z-value');
+    if (angleZInput) {
+        angleZInput.addEventListener('input', (e) => {
+            textData.fixedAngleZ = parseInt(e.target.value);
+            if (angleZValue) angleZValue.textContent = textData.fixedAngleZ;
+            if (textData.facingMode === 'fixed') {
+                rebuildParticleSystem();
+            }
+        });
+    }
+
+    // ========== GLB ANIMATION CONTROLS ==========
+    const glbAnimationTypeSelect = document.getElementById('glb-animation-type');
+    const rotateSpeedGroup = document.getElementById('rotate-speed-group');
+    const tumbleSpeedGroup = document.getElementById('tumble-speed-group');
+
+    if (glbAnimationTypeSelect) {
+        glbAnimationTypeSelect.addEventListener('change', (e) => {
+            textData.glbAnimationType = e.target.value;
+
+            // Show/hide speed controls
+            if (rotateSpeedGroup) rotateSpeedGroup.style.display = textData.glbAnimationType === 'rotate' ? 'block' : 'none';
+            if (tumbleSpeedGroup) tumbleSpeedGroup.style.display = textData.glbAnimationType === 'tumble' ? 'block' : 'none';
+
+            // Start or stop animation
+            if (textData.glbAnimationType !== 'none' && textData.shapeType === 'glb') {
+                startGLBAnimation();
+            } else {
+                stopGLBAnimation();
+            }
+        });
+    }
+
+    // Rotate speed
+    const rotateSpeedInput = document.getElementById('rotate-speed');
+    const rotateSpeedValue = document.getElementById('rotate-speed-value');
+    if (rotateSpeedInput) {
+        rotateSpeedInput.addEventListener('input', (e) => {
+            textData.rotateSpeed = parseFloat(e.target.value);
+            if (rotateSpeedValue) rotateSpeedValue.textContent = textData.rotateSpeed.toFixed(1);
+        });
+    }
+
+    // Tumble speed
+    const tumbleSpeedInput = document.getElementById('tumble-speed');
+    const tumbleSpeedValue = document.getElementById('tumble-speed-value');
+    if (tumbleSpeedInput) {
+        tumbleSpeedInput.addEventListener('input', (e) => {
+            textData.tumbleSpeed = parseFloat(e.target.value);
+            if (tumbleSpeedValue) tumbleSpeedValue.textContent = textData.tumbleSpeed.toFixed(1);
+            // Regenerate angular velocities
+            if (textData.glbAnimationType === 'tumble') {
+                for (let i = 0; i < particleRotations.length; i++) {
+                    const rot = particleRotations[i];
+                    rot.angularVelocityX = (Math.random() - 0.5) * 4 * textData.tumbleSpeed;
+                    rot.angularVelocityY = (Math.random() - 0.5) * 4 * textData.tumbleSpeed;
+                    rot.angularVelocityZ = (Math.random() - 0.5) * 4 * textData.tumbleSpeed;
+                }
+            }
         });
     }
 
@@ -1192,6 +1985,14 @@ function setupEventListeners() {
     });
 
     textData.previousCanvasSize = { width: canvas.width, height: canvas.height };
+
+    // Clear canvas button
+    const clearCanvasBtn = document.getElementById('clear-canvas-btn');
+    if (clearCanvasBtn) {
+        clearCanvasBtn.addEventListener('click', () => {
+            clearCanvas();
+        });
+    }
 }
 
 // ========== HIGH-RESOLUTION EXPORT ==========
