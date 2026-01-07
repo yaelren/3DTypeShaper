@@ -69,9 +69,10 @@ let textData = {
     fixedAngleY: 0,
     fixedAngleZ: 0,
 
-    // GLB Animation
-    glbAnimationType: 'none',  // 'none', 'rotate', 'tumble', 'lookAtMouse'
+    // Animation (unified for all shapes)
+    animationType: 'none',  // 'none', 'rotate', 'tumble', 'lookAtMouse'
     rotateSpeed: 1.0,
+    tumbleAmount: 5,  // 1-10, controls intensity of tumble
     tumbleSpeed: 1.0,
 
     // Animation
@@ -718,16 +719,16 @@ function rebuildParticleSystem() {
         baseScale: 1.0
     }));
 
-    // Initialize per-particle rotation data (for GLB facing/animation)
+    // Initialize per-particle rotation data (for facing/animation)
     particleRotations = cachedPoints.map(() => {
         const rot = {
             x: 0,
             y: 0,
             z: 0,
-            // Angular velocity for tumble animation
-            angularVelocityX: (Math.random() - 0.5) * 4 * textData.tumbleSpeed,
-            angularVelocityY: (Math.random() - 0.5) * 4 * textData.tumbleSpeed,
-            angularVelocityZ: (Math.random() - 0.5) * 4 * textData.tumbleSpeed,
+            // Angular velocity for tumble animation (tumbleAmount controls intensity)
+            angularVelocityX: (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5,
+            angularVelocityY: (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5,
+            angularVelocityZ: (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5,
             // Accumulated spin offset
             spinOffsetX: 0,
             spinOffsetY: 0,
@@ -761,9 +762,9 @@ function rebuildParticleSystem() {
     updateInstancedMesh();
     scene.add(instancedMesh);
 
-    // Start GLB animation if needed
-    if (textData.shapeType === 'glb' && textData.glbAnimationType !== 'none') {
-        startGLBAnimation();
+    // Start animation if needed (for any shape type)
+    if (textData.animationType !== 'none') {
+        startShapeAnimation();
     }
 
     render();
@@ -788,42 +789,33 @@ function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
         // Set position
         dummy.position.set(p.x, p.y, p.z);
 
-        // Apply rotation based on shape type
-        if (isGLB) {
-            // GLB-specific rotation handling
-            let finalRotX = rot.x;
-            let finalRotY = rot.y;
-            let finalRotZ = rot.z;
+        // Apply rotation based on animation type (works for all shapes now)
+        let finalRotX = rot.x;
+        let finalRotY = rot.y;
+        let finalRotZ = rot.z;
 
-            // Apply facing mode
-            if (textData.facingMode === 'billboard') {
-                // Face camera (orthographic, so just reset to default)
-                finalRotX = 0;
-                finalRotY = 0;
-                finalRotZ = 0;
-            }
-
-            // Apply animation offsets
-            if (textData.glbAnimationType === 'rotate') {
-                finalRotY += rot.spinOffsetY;
-            } else if (textData.glbAnimationType === 'tumble') {
-                finalRotX += rot.spinOffsetX;
-                finalRotY += rot.spinOffsetY;
-                finalRotZ += rot.spinOffsetZ;
-            } else if (textData.glbAnimationType === 'lookAtMouse') {
-                // Apply look-at-mouse rotation (calculated elsewhere)
-                finalRotX = rot.x;
-                finalRotY = rot.y;
-                finalRotZ = rot.z;
-            }
-
-            dummy.rotation.set(finalRotX, finalRotY, finalRotZ);
-        } else {
-            // Original behavior for spheres/cubes
-            const phase = (i * 0.1) % (Math.PI * 2);
-            dummy.rotation.set(rotationAngle + phase, rotationAngle + phase, 0);
+        // Apply facing mode for GLB only
+        if (isGLB && textData.facingMode === 'billboard') {
+            finalRotX = 0;
+            finalRotY = 0;
+            finalRotZ = 0;
         }
 
+        // Apply animation offsets based on animation type
+        if (textData.animationType === 'rotate') {
+            finalRotY += rot.spinOffsetY;
+        } else if (textData.animationType === 'tumble') {
+            finalRotX += rot.spinOffsetX;
+            finalRotY += rot.spinOffsetY;
+            finalRotZ += rot.spinOffsetZ;
+        } else if (textData.animationType === 'lookAtMouse') {
+            // Apply look-at-mouse rotation (calculated elsewhere)
+            finalRotX = rot.x;
+            finalRotY = rot.y;
+            finalRotZ = rot.z;
+        }
+
+        dummy.rotation.set(finalRotX, finalRotY, finalRotZ);
         dummy.scale.setScalar(textData.shapeSize * scale);
         dummy.updateMatrix();
 
@@ -833,14 +825,14 @@ function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
     instancedMesh.instanceMatrix.needsUpdate = true;
 }
 
-// ========== GLB ANIMATION SYSTEM ==========
-function startGLBAnimation() {
-    stopGLBAnimation();
+// ========== SHAPE ANIMATION SYSTEM ==========
+function startShapeAnimation() {
+    stopShapeAnimation();
 
-    if (textData.shapeType !== 'glb' || textData.glbAnimationType === 'none') return;
+    if (textData.animationType === 'none') return;
 
-    function glbAnimationLoop() {
-        if (textData.shapeType !== 'glb' || textData.glbAnimationType === 'none') {
+    function shapeAnimationLoop() {
+        if (textData.animationType === 'none') {
             glbAnimationFrameId = null;
             return;
         }
@@ -851,7 +843,7 @@ function startGLBAnimation() {
         for (let i = 0; i < particleRotations.length; i++) {
             const rot = particleRotations[i];
 
-            switch (textData.glbAnimationType) {
+            switch (textData.animationType) {
                 case 'rotate':
                     // Continuous Y-axis rotation
                     rot.spinOffsetY += textData.rotateSpeed * delta;
@@ -874,21 +866,25 @@ function startGLBAnimation() {
         updateInstancedMesh(0, delta);
         renderer.render(scene, camera);
 
-        glbAnimationFrameId = requestAnimationFrame(glbAnimationLoop);
+        glbAnimationFrameId = requestAnimationFrame(shapeAnimationLoop);
     }
 
     // Reset clock
     if (clock) clock.getDelta();
 
-    glbAnimationFrameId = requestAnimationFrame(glbAnimationLoop);
+    glbAnimationFrameId = requestAnimationFrame(shapeAnimationLoop);
 }
 
-function stopGLBAnimation() {
+function stopShapeAnimation() {
     if (glbAnimationFrameId) {
         cancelAnimationFrame(glbAnimationFrameId);
         glbAnimationFrameId = null;
     }
 }
+
+// Legacy aliases for compatibility
+function startGLBAnimation() { startShapeAnimation(); }
+function stopGLBAnimation() { stopShapeAnimation(); }
 
 function updateLookAtMouse(index, rot, delta) {
     if (!mouseWorldPos || textData.mouseX === null || textData.mouseY === null) return;
@@ -1310,16 +1306,28 @@ function setupEventListeners() {
 
     // Font selector
     const fontSelector = document.getElementById('font-selector');
+    const customFontInput = document.getElementById('custom-font-input');
+    let previousFontValue = 'Arial';  // Track previous selection
+
     if (fontSelector) {
         fontSelector.addEventListener('change', (e) => {
-            textData.fontFamily = e.target.value;
-            traceIndex = 0;
-            rebuildParticleSystem();
+            if (e.target.value === 'upload-custom') {
+                // Trigger file input when "Upload Custom Font..." is selected
+                if (customFontInput) {
+                    customFontInput.click();
+                }
+                // Reset to previous value (will be updated after upload)
+                fontSelector.value = previousFontValue;
+            } else {
+                previousFontValue = e.target.value;
+                textData.fontFamily = e.target.value;
+                traceIndex = 0;
+                rebuildParticleSystem();
+            }
         });
     }
 
     // Custom font upload
-    const customFontInput = document.getElementById('custom-font-input');
     if (customFontInput) {
         customFontInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
@@ -1335,11 +1343,14 @@ function setupEventListeners() {
                 document.head.appendChild(newStyle);
 
                 if (fontSelector) {
+                    // Insert new option before the "Upload Custom Font..." option
+                    const uploadOption = fontSelector.querySelector('option[value="upload-custom"]');
                     const option = document.createElement('option');
                     option.value = fontName;
                     option.textContent = file.name;
-                    fontSelector.appendChild(option);
+                    fontSelector.insertBefore(option, uploadOption);
                     fontSelector.value = fontName;
+                    previousFontValue = fontName;
                     textData.fontFamily = fontName;
 
                     try {
@@ -1394,22 +1405,15 @@ function setupEventListeners() {
     // Shape type
     const shapeTypeSelect = document.getElementById('shape-type');
     const glbUploadGroup = document.getElementById('glb-upload-group');
-    const glbFacingSection = document.getElementById('glb-facing-section');
-    const glbAnimationSection = document.getElementById('glb-animation-section');
+    const glbFacingGroup = document.getElementById('glb-facing-group');
 
     shapeTypeSelect.addEventListener('change', (e) => {
         textData.shapeType = e.target.value;
         const isGLB = textData.shapeType === 'glb';
 
-        // Show/hide GLB-specific sections
+        // Show/hide GLB-specific controls (within 3D SHAPES section)
         if (glbUploadGroup) glbUploadGroup.style.display = isGLB ? 'block' : 'none';
-        if (glbFacingSection) glbFacingSection.style.display = isGLB ? 'block' : 'none';
-        if (glbAnimationSection) glbAnimationSection.style.display = isGLB ? 'block' : 'none';
-
-        // Stop GLB animation if switching away from GLB
-        if (!isGLB) {
-            stopGLBAnimation();
-        }
+        if (glbFacingGroup) glbFacingGroup.style.display = isGLB ? 'block' : 'none';
 
         rebuildParticleSystem();
     });
@@ -1629,24 +1633,24 @@ function setupEventListeners() {
         });
     }
 
-    // ========== GLB ANIMATION CONTROLS ==========
-    const glbAnimationTypeSelect = document.getElementById('glb-animation-type');
+    // ========== ANIMATION CONTROLS (Unified for all shapes) ==========
+    const animationTypeSelect = document.getElementById('animation-type');
     const rotateSpeedGroup = document.getElementById('rotate-speed-group');
-    const tumbleSpeedGroup = document.getElementById('tumble-speed-group');
+    const tumbleControlsGroup = document.getElementById('tumble-controls-group');
 
-    if (glbAnimationTypeSelect) {
-        glbAnimationTypeSelect.addEventListener('change', (e) => {
-            textData.glbAnimationType = e.target.value;
+    if (animationTypeSelect) {
+        animationTypeSelect.addEventListener('change', (e) => {
+            textData.animationType = e.target.value;
 
-            // Show/hide speed controls
-            if (rotateSpeedGroup) rotateSpeedGroup.style.display = textData.glbAnimationType === 'rotate' ? 'block' : 'none';
-            if (tumbleSpeedGroup) tumbleSpeedGroup.style.display = textData.glbAnimationType === 'tumble' ? 'block' : 'none';
+            // Show/hide animation-specific controls
+            if (rotateSpeedGroup) rotateSpeedGroup.style.display = textData.animationType === 'rotate' ? 'block' : 'none';
+            if (tumbleControlsGroup) tumbleControlsGroup.style.display = textData.animationType === 'tumble' ? 'block' : 'none';
 
             // Start or stop animation
-            if (textData.glbAnimationType !== 'none' && textData.shapeType === 'glb') {
-                startGLBAnimation();
+            if (textData.animationType !== 'none') {
+                startShapeAnimation();
             } else {
-                stopGLBAnimation();
+                stopShapeAnimation();
             }
         });
     }
@@ -1661,6 +1665,25 @@ function setupEventListeners() {
         });
     }
 
+    // Tumble amount
+    const tumbleAmountInput = document.getElementById('tumble-amount');
+    const tumbleAmountValue = document.getElementById('tumble-amount-value');
+    if (tumbleAmountInput) {
+        tumbleAmountInput.addEventListener('input', (e) => {
+            textData.tumbleAmount = parseInt(e.target.value);
+            if (tumbleAmountValue) tumbleAmountValue.textContent = textData.tumbleAmount;
+            // Regenerate angular velocities with new amount
+            if (textData.animationType === 'tumble') {
+                for (let i = 0; i < particleRotations.length; i++) {
+                    const rot = particleRotations[i];
+                    rot.angularVelocityX = (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5;
+                    rot.angularVelocityY = (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5;
+                    rot.angularVelocityZ = (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5;
+                }
+            }
+        });
+    }
+
     // Tumble speed
     const tumbleSpeedInput = document.getElementById('tumble-speed');
     const tumbleSpeedValue = document.getElementById('tumble-speed-value');
@@ -1668,13 +1691,13 @@ function setupEventListeners() {
         tumbleSpeedInput.addEventListener('input', (e) => {
             textData.tumbleSpeed = parseFloat(e.target.value);
             if (tumbleSpeedValue) tumbleSpeedValue.textContent = textData.tumbleSpeed.toFixed(1);
-            // Regenerate angular velocities
-            if (textData.glbAnimationType === 'tumble') {
+            // Regenerate angular velocities with new speed
+            if (textData.animationType === 'tumble') {
                 for (let i = 0; i < particleRotations.length; i++) {
                     const rot = particleRotations[i];
-                    rot.angularVelocityX = (Math.random() - 0.5) * 4 * textData.tumbleSpeed;
-                    rot.angularVelocityY = (Math.random() - 0.5) * 4 * textData.tumbleSpeed;
-                    rot.angularVelocityZ = (Math.random() - 0.5) * 4 * textData.tumbleSpeed;
+                    rot.angularVelocityX = (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5;
+                    rot.angularVelocityY = (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5;
+                    rot.angularVelocityZ = (Math.random() - 0.5) * textData.tumbleAmount * textData.tumbleSpeed * 0.5;
                 }
             }
         });
@@ -1754,31 +1777,6 @@ function setupEventListeners() {
         shapeColorInput.addEventListener('input', (e) => {
             textData.shapeColor = e.target.value;
             rebuildParticleSystem();
-        });
-    }
-
-    // Animation toggle
-    const animateToggle = document.getElementById('animate-shapes');
-    const animationSpeedGroup = document.getElementById('animation-speed-group');
-    if (animateToggle) {
-        animateToggle.addEventListener('toggle-change', (e) => {
-            if (e.detail.checked) {
-                if (animationSpeedGroup) animationSpeedGroup.style.display = 'block';
-                startAnimation();
-            } else {
-                if (animationSpeedGroup) animationSpeedGroup.style.display = 'none';
-                stopAnimation();
-            }
-        });
-    }
-
-    // Animation speed
-    const animationSpeedInput = document.getElementById('animation-speed');
-    const animationSpeedValue = document.getElementById('animation-speed-value');
-    if (animationSpeedInput) {
-        animationSpeedInput.addEventListener('input', (e) => {
-            textData.animationSpeed = parseFloat(e.target.value);
-            if (animationSpeedValue) animationSpeedValue.textContent = textData.animationSpeed.toFixed(1);
         });
     }
 
@@ -1891,9 +1889,15 @@ function setupEventListeners() {
         });
     }
 
-    // Mouse tracking for hover effect
+    // Mouse tracking for hover effect AND look at mouse animation
+    function needsMouseTracking() {
+        // Track mouse if hover effect is enabled (in mouse mode) OR if animation is lookAtMouse
+        return (textData.hoverEffectEnabled && textData.interactionMode === 'mouse') ||
+               textData.animationType === 'lookAtMouse';
+    }
+
     function updateMousePosition(e) {
-        if (!textData.hoverEffectEnabled || textData.interactionMode !== 'mouse') return;
+        if (!needsMouseTracking()) return;
 
         const coords = window.Chatooly ?
             window.Chatooly.utils.mapMouseToCanvas(e, canvas) :
@@ -1914,7 +1918,9 @@ function setupEventListeners() {
 
     canvas.addEventListener('mousemove', updateMousePosition);
     canvas.addEventListener('mouseleave', () => {
-        if (textData.interactionMode === 'mouse') {
+        // Only clear mouse position if in mouse mode for hover effect
+        // (lookAtMouse should keep tracking even on leave for smooth behavior)
+        if (textData.interactionMode === 'mouse' && textData.animationType !== 'lookAtMouse') {
             textData.mouseX = null;
             textData.mouseY = null;
             if (textData.hoverEffectEnabled && !textData.isAnimating) {
