@@ -27,14 +27,29 @@ let particlePositions = [];
 
 // ========== STATE MANAGEMENT ==========
 let textData = {
+    // Source mode settings
+    sourceMode: 'text',              // 'text' | 'shape' | 'svg'
+    // Predefined shapes
+    spawnShapeType: 'circle',        // 'circle' | 'square' | 'triangle' | 'star' | 'heart' | 'hexagon'
+    spawnShapeSize: 200,             // Size in pixels (50-500)
+    shapeFillMode: 'outline',        // 'outline' | 'fill'
+    // SVG settings
+    svgData: null,                   // Parsed SVG data object
+    svgFileName: null,               // Original filename
+    svgSampleMode: 'outline',        // 'outline' | 'fill' | 'both'
+    svgFitMode: 'contain',           // 'contain' | 'cover' | 'stretch'
+
+    // Text settings
     text: '3D Type Shaper',
     fontFamily: 'Arial',
     fontSize: 200,
-    lineHeight: 1.2,
+    leading: 1.2,           // Renamed from lineHeight
+    letterSpacing: 0,       // Kerning in pixels (-10 to 50)
+    textAlign: 'center',    // 'left', 'center', 'right'
     textOffsetX: 0,
     textOffsetY: 0,
 
-    // Shape settings
+    // 3D Shape settings (the objects that spawn at each point)
     shapeType: 'sphere',  // 'sphere', 'cube', 'glb'
     shapeSize: 5,
     spacing: 1.0,
@@ -72,6 +87,7 @@ let textData = {
     // Animation (unified for all shapes)
     animationType: 'none',  // 'none', 'rotate', 'tumble', 'lookAtMouse'
     rotateSpeed: 1.0,
+    rotationAxis: { x: 0, y: 1, z: 0 },  // Direction vector for rotation
     tumbleAmount: 5,  // 1-10, controls intensity of tumble
     tumbleSpeed: 1.0,
 
@@ -80,7 +96,32 @@ let textData = {
     animationSpeed: 1.0,
     animationTime: 0,
 
-    // Hover effect
+    // Hover effects (stackable system)
+    hoverEffects: {
+        enabled: false,
+        radius: 150,
+        // Magnification effect
+        magnification: {
+            enabled: true,
+            intensity: 2.0,       // Scale multiplier (0.5 - 3.0)
+        },
+        // Rotation effect
+        rotation: {
+            enabled: false,
+            mode: 'continuous',   // 'continuous' | 'target'
+            speed: 2.0,           // For continuous mode
+            targetAngle: { x: 0, y: 180, z: 0 },  // For target mode (degrees)
+            axis: { x: 0, y: 1, z: 0 },
+        },
+        // Material crossfade effect
+        materialCrossfade: {
+            enabled: false,
+            hoverMatcap: null,         // Matcap texture (if uploaded)
+            fallbackColor: '#ffffff',  // Color picker fallback
+            transitionDuration: 0.3,   // Seconds to crossfade
+        }
+    },
+    // Legacy hover properties (for backwards compatibility)
     hoverEffectEnabled: false,
     hoverRadius: 150,
     hoverIntensity: 2.0,
@@ -406,25 +447,56 @@ function getTextPoints(text, fontSize, spacing) {
 
     // Set font
     tempCtx.font = `bold ${fontSize}px ${textData.fontFamily}, sans-serif`;
-    tempCtx.textAlign = 'center';
     tempCtx.textBaseline = 'middle';
     tempCtx.fillStyle = '#FFFFFF';
 
+    // Apply letter spacing (kerning) if supported
+    if (textData.letterSpacing !== 0) {
+        tempCtx.letterSpacing = `${textData.letterSpacing}px`;
+    }
+
     // Split text into lines
     const lines = text.split('\n');
-    const lineHeightPixels = fontSize * textData.lineHeight;
+    const leadingPixels = fontSize * textData.leading;
+
+    // Measure all line widths for alignment
+    const lineWidths = lines.map(line => tempCtx.measureText(line).width);
+    const maxLineWidth = Math.max(...lineWidths);
 
     // Calculate total text height for proper vertical centering
-    const totalTextHeight = fontSize + (lines.length - 1) * lineHeightPixels;
+    const totalTextHeight = fontSize + (lines.length - 1) * leadingPixels;
     const offsetX = (textData.textOffsetX / 100) * canvas.width;
     const offsetY = (textData.textOffsetY / 100) * canvas.height;
     const startY = (canvas.height / 2) - (totalTextHeight / 2) + (fontSize / 2) + offsetY;
-    const centerX = (canvas.width / 2) + offsetX;
+    const baseCenterX = (canvas.width / 2) + offsetX;
 
-    // Draw each line
+    // Draw each line with alignment
     lines.forEach((line, index) => {
-        const y = startY + (index * lineHeightPixels);
-        tempCtx.fillText(line, centerX, y);
+        const y = startY + (index * leadingPixels);
+        const lineWidth = lineWidths[index];
+
+        // Calculate X position based on alignment
+        let lineX;
+        switch (textData.textAlign) {
+            case 'left':
+                // Left edge of all lines aligned, starting from center minus half max width
+                tempCtx.textAlign = 'left';
+                lineX = baseCenterX - (maxLineWidth / 2);
+                break;
+            case 'right':
+                // Right edge of all lines aligned
+                tempCtx.textAlign = 'right';
+                lineX = baseCenterX + (maxLineWidth / 2);
+                break;
+            case 'center':
+            default:
+                // Center each line individually (original behavior)
+                tempCtx.textAlign = 'center';
+                lineX = baseCenterX;
+                break;
+        }
+
+        tempCtx.fillText(line, lineX, y);
     });
 
     // Sample pixels from the filled text
@@ -459,6 +531,50 @@ function getTextPoints(text, fontSize, spacing) {
     }
 
     return points;
+}
+
+// ========== SVG SHAPE POINTS ==========
+function getSVGShapePoints(spacing, canvasSize) {
+    if (!textData.svgData || !window.SVGPointSampler || !window.SVGCoordinateNormalizer) {
+        return [];
+    }
+
+    const sampler = new SVGPointSampler();
+
+    try {
+        // Sample points based on mode
+        const rawPoints = sampler.sampleAllPaths(textData.svgData, spacing, {
+            includeOutline: textData.svgSampleMode !== 'fill',
+            includeFill: textData.svgSampleMode !== 'outline',
+            mergeOverlapping: true
+        });
+
+        // Normalize to canvas coordinates
+        const normalizedPoints = SVGCoordinateNormalizer.normalize(
+            rawPoints,
+            textData.svgData.viewBox,
+            canvasSize,
+            {
+                fitMode: textData.svgFitMode,
+                padding: 0.1,
+                offsetX: textData.textOffsetX,
+                offsetY: textData.textOffsetY
+            }
+        );
+
+        // Apply point limit for performance
+        const maxPoints = 10000;
+        if (normalizedPoints.length > maxPoints) {
+            console.warn(`SVG has ${normalizedPoints.length} points, limiting to ${maxPoints}`);
+            // Keep every Nth point
+            const step = Math.ceil(normalizedPoints.length / maxPoints);
+            return normalizedPoints.filter((_, i) => i % step === 0);
+        }
+
+        return normalizedPoints;
+    } finally {
+        sampler.cleanup();
+    }
 }
 
 // ========== GEOMETRY CREATION ==========
@@ -674,13 +790,47 @@ function rebuildParticleSystem() {
     if (!scene || !window.THREE) return;
 
     const THREE = window.THREE;
+    const canvas = document.getElementById('chatooly-canvas');
+    const canvasSize = { width: canvas.width, height: canvas.height };
+    const spacing = textData.shapeSize * textData.spacing;
 
-    // Get text points
-    cachedPoints = getTextPoints(
-        textData.text,
-        textData.fontSize,
-        textData.shapeSize * textData.spacing
-    );
+    // Get points based on source mode
+    switch (textData.sourceMode) {
+        case 'shape':
+            // Use parametric shapes
+            if (window.ParametricShapes) {
+                cachedPoints = ParametricShapes.getShapePoints(
+                    textData.spawnShapeType,
+                    textData.spawnShapeSize,
+                    spacing,
+                    textData.shapeFillMode,
+                    canvasSize
+                );
+            } else {
+                console.warn('ParametricShapes not loaded');
+                cachedPoints = [];
+            }
+            break;
+
+        case 'svg':
+            // Use uploaded SVG
+            if (textData.svgData && window.SVGPointSampler) {
+                cachedPoints = getSVGShapePoints(spacing, canvasSize);
+            } else {
+                cachedPoints = [];
+            }
+            break;
+
+        case 'text':
+        default:
+            // Use text (original behavior)
+            cachedPoints = getTextPoints(
+                textData.text,
+                textData.fontSize,
+                spacing
+            );
+            break;
+    }
 
     if (cachedPoints.length === 0) {
         // Clear existing mesh if no points
@@ -710,6 +860,17 @@ function rebuildParticleSystem() {
         cachedPoints.length
     );
     instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    // Initialize instance colors for material crossfade effect
+    const colors = new Float32Array(cachedPoints.length * 3);
+    const baseColor = new THREE.Color(textData.shapeColor);
+    for (let i = 0; i < cachedPoints.length; i++) {
+        colors[i * 3] = baseColor.r;
+        colors[i * 3 + 1] = baseColor.g;
+        colors[i * 3 + 2] = baseColor.b;
+    }
+    instancedMesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+    instancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
 
     // Store particle positions and initialize rotations
     particlePositions = cachedPoints.map(p => ({
@@ -770,19 +931,42 @@ function rebuildParticleSystem() {
     render();
 }
 
+// Reusable color objects for crossfade (avoid creating in loop)
+let _baseColor = null;
+let _hoverColor = null;
+let _blendedColor = null;
+
 function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
     if (!instancedMesh || !dummy || particlePositions.length === 0) return;
 
     const THREE = window.THREE;
     const isGLB = textData.shapeType === 'glb';
+    const DEG2RAD = Math.PI / 180;
+
+    // Initialize reusable color objects if needed
+    if (!_baseColor) _baseColor = new THREE.Color();
+    if (!_hoverColor) _hoverColor = new THREE.Color();
+    if (!_blendedColor) _blendedColor = new THREE.Color();
+
+    // Check if crossfade is active
+    const crossfadeActive = textData.hoverEffects.enabled &&
+                           textData.hoverEffects.materialCrossfade.enabled &&
+                           instancedMesh.instanceColor;
+
+    // Pre-compute colors for crossfade
+    if (crossfadeActive) {
+        _baseColor.set(textData.shapeColor);
+        _hoverColor.set(textData.hoverEffects.materialCrossfade.fallbackColor);
+    }
 
     for (let i = 0; i < particlePositions.length; i++) {
         const p = particlePositions[i];
-        const rot = particleRotations[i] || { x: 0, y: 0, z: 0 };
+        const rot = particleRotations[i] || { x: 0, y: 0, z: 0, spinOffsetX: 0, spinOffsetY: 0, spinOffsetZ: 0, hoverRotX: 0, hoverRotY: 0, hoverRotZ: 0 };
 
-        // Calculate hover scale
+        // Calculate hover scale (for magnification effect)
         let scale = p.baseScale;
-        if (textData.hoverEffectEnabled && textData.mouseX !== null) {
+        const hoverEnabled = textData.hoverEffectEnabled || textData.hoverEffects.enabled;
+        if (hoverEnabled && textData.mouseX !== null) {
             scale *= getHoverScale3D(p.x, p.y);
         }
 
@@ -803,7 +987,9 @@ function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
 
         // Apply animation offsets based on animation type
         if (textData.animationType === 'rotate') {
+            finalRotX += rot.spinOffsetX;
             finalRotY += rot.spinOffsetY;
+            finalRotZ += rot.spinOffsetZ;
         } else if (textData.animationType === 'tumble') {
             finalRotX += rot.spinOffsetX;
             finalRotY += rot.spinOffsetY;
@@ -815,14 +1001,58 @@ function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
             finalRotZ = rot.z;
         }
 
+        // Apply hover rotation effect (stackable)
+        if (textData.hoverEffects.enabled && textData.hoverEffects.rotation.enabled) {
+            const hoverProgress = getHoverProgress(p.x, p.y);
+            if (hoverProgress > 0) {
+                const rotEffect = textData.hoverEffects.rotation;
+
+                if (rotEffect.mode === 'continuous') {
+                    // Continuous spin while hovering - accumulate rotation over time
+                    if (!rot.hoverRotX) rot.hoverRotX = 0;
+                    if (!rot.hoverRotY) rot.hoverRotY = 0;
+                    if (!rot.hoverRotZ) rot.hoverRotZ = 0;
+
+                    rot.hoverRotX += rotEffect.axis.x * rotEffect.speed * deltaTime * hoverProgress;
+                    rot.hoverRotY += rotEffect.axis.y * rotEffect.speed * deltaTime * hoverProgress;
+                    rot.hoverRotZ += rotEffect.axis.z * rotEffect.speed * deltaTime * hoverProgress;
+
+                    finalRotX += rot.hoverRotX;
+                    finalRotY += rot.hoverRotY;
+                    finalRotZ += rot.hoverRotZ;
+                } else if (rotEffect.mode === 'target') {
+                    // Rotate towards target angle based on hover progress
+                    finalRotX += rotEffect.targetAngle.x * DEG2RAD * hoverProgress;
+                    finalRotY += rotEffect.targetAngle.y * DEG2RAD * hoverProgress;
+                    finalRotZ += rotEffect.targetAngle.z * DEG2RAD * hoverProgress;
+                }
+            }
+        }
+
         dummy.rotation.set(finalRotX, finalRotY, finalRotZ);
         dummy.scale.setScalar(textData.shapeSize * scale);
         dummy.updateMatrix();
 
         instancedMesh.setMatrixAt(i, dummy.matrix);
+
+        // Apply material crossfade effect (color blending)
+        if (crossfadeActive) {
+            const hoverProgress = getHoverProgress(p.x, p.y);
+
+            // Lerp between base and hover color based on progress
+            _blendedColor.copy(_baseColor).lerp(_hoverColor, hoverProgress);
+
+            // Set the instance color
+            instancedMesh.instanceColor.setXYZ(i, _blendedColor.r, _blendedColor.g, _blendedColor.b);
+        }
     }
 
     instancedMesh.instanceMatrix.needsUpdate = true;
+
+    // Update instance colors if crossfade is active
+    if (crossfadeActive) {
+        instancedMesh.instanceColor.needsUpdate = true;
+    }
 }
 
 // ========== SHAPE ANIMATION SYSTEM ==========
@@ -845,8 +1075,10 @@ function startShapeAnimation() {
 
             switch (textData.animationType) {
                 case 'rotate':
-                    // Continuous Y-axis rotation
-                    rot.spinOffsetY += textData.rotateSpeed * delta;
+                    // Multi-axis rotation based on direction vector
+                    rot.spinOffsetX += textData.rotationAxis.x * textData.rotateSpeed * delta;
+                    rot.spinOffsetY += textData.rotationAxis.y * textData.rotateSpeed * delta;
+                    rot.spinOffsetZ += textData.rotationAxis.z * textData.rotateSpeed * delta;
                     break;
 
                 case 'tumble':
@@ -940,7 +1172,9 @@ function updateLookAtMouse(index, rot, delta) {
 
 // ========== HOVER EFFECT ==========
 function getHoverScale3D(pointX, pointY) {
-    if (!textData.hoverEffectEnabled || textData.mouseX === null || textData.mouseY === null) {
+    // Check both old and new hover state for backwards compatibility
+    const hoverEnabled = textData.hoverEffectEnabled || textData.hoverEffects.enabled;
+    if (!hoverEnabled || textData.mouseX === null || textData.mouseY === null) {
         return 1.0;
     }
 
@@ -959,23 +1193,72 @@ function getHoverScale3D(pointX, pointY) {
     const dy = screenY - textData.mouseY;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    if (distance >= textData.hoverRadius) {
+    // Use new hover system radius if enabled, otherwise legacy
+    const radius = textData.hoverEffects.enabled ? textData.hoverEffects.radius : textData.hoverRadius;
+
+    if (distance >= radius) {
+        return 1.0;
+    }
+
+    // Check if magnification effect is enabled
+    const magnificationEnabled = textData.hoverEffects.enabled
+        ? textData.hoverEffects.magnification.enabled
+        : true;
+
+    if (!magnificationEnabled) {
         return 1.0;
     }
 
     // Calculate scale factor
-    const normalizedDistance = distance / textData.hoverRadius;
+    const normalizedDistance = distance / radius;
     let scale;
 
-    if (textData.hoverIntensity >= 1.0) {
-        scale = 1.0 + (textData.hoverIntensity - 1.0) * (1 - normalizedDistance);
+    // Use new intensity if new system enabled, otherwise legacy
+    const intensity = textData.hoverEffects.enabled
+        ? textData.hoverEffects.magnification.intensity
+        : textData.hoverIntensity;
+
+    if (intensity >= 1.0) {
+        scale = 1.0 + (intensity - 1.0) * (1 - normalizedDistance);
     } else {
-        const shrinkAmount = Math.abs(textData.hoverIntensity);
+        const shrinkAmount = Math.abs(intensity);
         const minScale = Math.max(0.1, 1.0 / (shrinkAmount + 1));
         scale = 1.0 - (1.0 - minScale) * (1 - normalizedDistance);
     }
 
     return Math.max(0.1, scale);
+}
+
+/**
+ * Calculate hover progress (0-1) for a point
+ * Used for rotation and material crossfade effects
+ */
+function getHoverProgress(pointX, pointY) {
+    const hoverEnabled = textData.hoverEffectEnabled || textData.hoverEffects.enabled;
+    if (!hoverEnabled || textData.mouseX === null || textData.mouseY === null) {
+        return 0;
+    }
+
+    const THREE = window.THREE;
+    const canvas = document.getElementById('chatooly-canvas');
+
+    const vec = new THREE.Vector3(pointX, pointY, 0);
+    vec.project(camera);
+
+    const screenX = (vec.x + 1) / 2 * canvas.width;
+    const screenY = (-vec.y + 1) / 2 * canvas.height;
+
+    const dx = screenX - textData.mouseX;
+    const dy = screenY - textData.mouseY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    const radius = textData.hoverEffects.enabled ? textData.hoverEffects.radius : textData.hoverRadius;
+
+    if (distance >= radius) {
+        return 0;
+    }
+
+    return 1 - (distance / radius);
 }
 
 // ========== AUTO POSITION PATTERNS ==========
@@ -1164,11 +1447,11 @@ function clearCanvas() {
 }
 
 // ========== RENDER ==========
-function render(rotationAngle = 0) {
+function render(rotationAngle = 0, deltaTime = 0.016) {
     if (!renderer || !scene || !camera) return;
 
-    // Update instanced mesh
-    updateInstancedMesh(rotationAngle);
+    // Update instanced mesh with deltaTime for hover rotation effects
+    updateInstancedMesh(rotationAngle, deltaTime);
 
     // Render scene
     renderer.render(scene, camera);
@@ -1297,6 +1580,128 @@ function updateGradientPreview() {
 function setupEventListeners() {
     const canvas = document.getElementById('chatooly-canvas');
 
+    // ========== SOURCE MODE CONTROLS ==========
+    const sourceModeSelect = document.getElementById('source-mode');
+    const shapeSourceControls = document.getElementById('shape-source-controls');
+    const svgSourceControls = document.getElementById('svg-source-controls');
+    const textSection = document.querySelector('[data-section="text"]');
+
+    if (sourceModeSelect) {
+        sourceModeSelect.addEventListener('change', (e) => {
+            textData.sourceMode = e.target.value;
+
+            // Show/hide relevant controls
+            if (shapeSourceControls) shapeSourceControls.style.display = textData.sourceMode === 'shape' ? 'block' : 'none';
+            if (svgSourceControls) svgSourceControls.style.display = textData.sourceMode === 'svg' ? 'block' : 'none';
+            if (textSection) textSection.style.display = textData.sourceMode === 'text' ? 'block' : 'none';
+
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // Shape type selector
+    const spawnShapeTypeSelect = document.getElementById('spawn-shape-type');
+    if (spawnShapeTypeSelect) {
+        spawnShapeTypeSelect.addEventListener('change', (e) => {
+            textData.spawnShapeType = e.target.value;
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // Shape size slider
+    const spawnShapeSizeInput = document.getElementById('spawn-shape-size');
+    const spawnShapeSizeValue = document.getElementById('spawn-shape-size-value');
+    if (spawnShapeSizeInput) {
+        spawnShapeSizeInput.addEventListener('input', (e) => {
+            textData.spawnShapeSize = parseInt(e.target.value);
+            if (spawnShapeSizeValue) spawnShapeSizeValue.textContent = textData.spawnShapeSize;
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // Fill mode buttons
+    const fillModeOutline = document.getElementById('fill-mode-outline');
+    const fillModeFill = document.getElementById('fill-mode-fill');
+    if (fillModeOutline && fillModeFill) {
+        fillModeOutline.addEventListener('click', () => {
+            textData.shapeFillMode = 'outline';
+            fillModeOutline.classList.add('active');
+            fillModeFill.classList.remove('active');
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+        fillModeFill.addEventListener('click', () => {
+            textData.shapeFillMode = 'fill';
+            fillModeFill.classList.add('active');
+            fillModeOutline.classList.remove('active');
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // SVG upload
+    const svgUploadInput = document.getElementById('svg-upload');
+    const svgInfo = document.getElementById('svg-info');
+    const svgName = document.getElementById('svg-name');
+    const clearSvgBtn = document.getElementById('clear-svg');
+
+    if (svgUploadInput) {
+        svgUploadInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const parser = new SVGShapeParser();
+                textData.svgData = await parser.parse(file);
+                textData.svgFileName = file.name;
+
+                if (svgInfo) svgInfo.style.display = 'block';
+                if (svgName) svgName.textContent = file.name;
+
+                traceIndex = 0;
+                rebuildParticleSystem();
+            } catch (err) {
+                console.error('SVG parsing error:', err);
+                alert('Error parsing SVG: ' + err.message);
+            }
+        });
+    }
+
+    if (clearSvgBtn) {
+        clearSvgBtn.addEventListener('click', () => {
+            textData.svgData = null;
+            textData.svgFileName = null;
+            if (svgInfo) svgInfo.style.display = 'none';
+            if (svgUploadInput) svgUploadInput.value = '';
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // SVG sample mode
+    const svgSampleModeSelect = document.getElementById('svg-sample-mode');
+    if (svgSampleModeSelect) {
+        svgSampleModeSelect.addEventListener('change', (e) => {
+            textData.svgSampleMode = e.target.value;
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // SVG fit mode
+    const svgFitModeSelect = document.getElementById('svg-fit-mode');
+    if (svgFitModeSelect) {
+        svgFitModeSelect.addEventListener('change', (e) => {
+            textData.svgFitMode = e.target.value;
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // ========== TEXT INPUT ==========
     // Text input
     document.getElementById('text-input').addEventListener('input', (e) => {
         textData.text = e.target.value || ' ';
@@ -1367,17 +1772,41 @@ function setupEventListeners() {
         });
     }
 
-    // Line height
-    const lineHeightInput = document.getElementById('line-height');
-    const lineHeightValue = document.getElementById('line-height-value');
-    if (lineHeightInput) {
-        lineHeightInput.addEventListener('input', (e) => {
-            textData.lineHeight = parseFloat(e.target.value);
-            if (lineHeightValue) lineHeightValue.textContent = textData.lineHeight.toFixed(1);
+    // Leading (renamed from Line Height)
+    const leadingInput = document.getElementById('leading');
+    const leadingValue = document.getElementById('leading-value');
+    if (leadingInput) {
+        leadingInput.addEventListener('input', (e) => {
+            textData.leading = parseFloat(e.target.value);
+            if (leadingValue) leadingValue.textContent = textData.leading.toFixed(1);
             traceIndex = 0;
             rebuildParticleSystem();
         });
     }
+
+    // Letter Spacing (Kerning)
+    const letterSpacingInput = document.getElementById('letter-spacing');
+    const letterSpacingValue = document.getElementById('letter-spacing-value');
+    if (letterSpacingInput) {
+        letterSpacingInput.addEventListener('input', (e) => {
+            textData.letterSpacing = parseInt(e.target.value);
+            if (letterSpacingValue) letterSpacingValue.textContent = textData.letterSpacing;
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    }
+
+    // Text Alignment
+    const textAlignButtons = document.querySelectorAll('.text-align-btn');
+    textAlignButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            textAlignButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            textData.textAlign = btn.dataset.align;
+            traceIndex = 0;
+            rebuildParticleSystem();
+        });
+    });
 
     // Text position offsets
     const textOffsetXInput = document.getElementById('text-offset-x');
@@ -1665,6 +2094,34 @@ function setupEventListeners() {
         });
     }
 
+    // Rotation axis controls
+    const rotationAxisXInput = document.getElementById('rotation-axis-x');
+    const rotationAxisXValue = document.getElementById('rotation-axis-x-value');
+    if (rotationAxisXInput) {
+        rotationAxisXInput.addEventListener('input', (e) => {
+            textData.rotationAxis.x = parseFloat(e.target.value);
+            if (rotationAxisXValue) rotationAxisXValue.textContent = textData.rotationAxis.x.toFixed(1);
+        });
+    }
+
+    const rotationAxisYInput = document.getElementById('rotation-axis-y');
+    const rotationAxisYValue = document.getElementById('rotation-axis-y-value');
+    if (rotationAxisYInput) {
+        rotationAxisYInput.addEventListener('input', (e) => {
+            textData.rotationAxis.y = parseFloat(e.target.value);
+            if (rotationAxisYValue) rotationAxisYValue.textContent = textData.rotationAxis.y.toFixed(1);
+        });
+    }
+
+    const rotationAxisZInput = document.getElementById('rotation-axis-z');
+    const rotationAxisZValue = document.getElementById('rotation-axis-z-value');
+    if (rotationAxisZInput) {
+        rotationAxisZInput.addEventListener('input', (e) => {
+            textData.rotationAxis.z = parseFloat(e.target.value);
+            if (rotationAxisZValue) rotationAxisZValue.textContent = textData.rotationAxis.z.toFixed(1);
+        });
+    }
+
     // Tumble amount
     const tumbleAmountInput = document.getElementById('tumble-amount');
     const tumbleAmountValue = document.getElementById('tumble-amount-value');
@@ -1780,15 +2237,16 @@ function setupEventListeners() {
         });
     }
 
-    // Hover effect toggle
+    // Hover effect toggle (master toggle)
     const hoverEffectToggle = document.getElementById('hover-effect');
     const hoverControlsGroup = document.getElementById('hover-controls-group');
 
     if (hoverEffectToggle) {
         hoverEffectToggle.addEventListener('toggle-change', (e) => {
             textData.hoverEffectEnabled = e.detail.checked;
+            textData.hoverEffects.enabled = e.detail.checked;
 
-            if (textData.hoverEffectEnabled) {
+            if (textData.hoverEffects.enabled) {
                 if (hoverControlsGroup) hoverControlsGroup.style.display = 'block';
                 if (window.startHoverRendering) {
                     window.startHoverRendering();
@@ -1869,30 +2327,196 @@ function setupEventListeners() {
         });
     }
 
-    // Hover radius
+    // Hover radius (shared across all effects)
     const hoverRadiusInput = document.getElementById('hover-radius');
     const hoverRadiusValue = document.getElementById('hover-radius-value');
     if (hoverRadiusInput) {
         hoverRadiusInput.addEventListener('input', (e) => {
             textData.hoverRadius = parseInt(e.target.value);
+            textData.hoverEffects.radius = parseInt(e.target.value);
             if (hoverRadiusValue) hoverRadiusValue.textContent = textData.hoverRadius;
         });
     }
 
-    // Hover intensity
+    // Hover intensity (magnification intensity)
     const hoverIntensityInput = document.getElementById('hover-intensity');
     const hoverIntensityValue = document.getElementById('hover-intensity-value');
     if (hoverIntensityInput) {
         hoverIntensityInput.addEventListener('input', (e) => {
             textData.hoverIntensity = parseFloat(e.target.value);
+            textData.hoverEffects.magnification.intensity = parseFloat(e.target.value);
             if (hoverIntensityValue) hoverIntensityValue.textContent = textData.hoverIntensity.toFixed(1);
+        });
+    }
+
+    // ===== STACKABLE HOVER EFFECTS =====
+
+    // Magnification toggle
+    const magnificationToggle = document.getElementById('hover-magnification-toggle');
+    const magnificationControls = document.getElementById('hover-magnification-controls');
+    if (magnificationToggle) {
+        magnificationToggle.addEventListener('toggle-change', (e) => {
+            textData.hoverEffects.magnification.enabled = e.detail.checked;
+            if (magnificationControls) {
+                magnificationControls.style.display = e.detail.checked ? 'block' : 'none';
+            }
+        });
+    }
+
+    // Rotation toggle
+    const rotationToggle = document.getElementById('hover-rotation-toggle');
+    const rotationControls = document.getElementById('hover-rotation-controls');
+    if (rotationToggle) {
+        rotationToggle.addEventListener('toggle-change', (e) => {
+            textData.hoverEffects.rotation.enabled = e.detail.checked;
+            if (rotationControls) {
+                rotationControls.style.display = e.detail.checked ? 'block' : 'none';
+            }
+        });
+    }
+
+    // Rotation mode buttons (continuous vs target)
+    const rotContinuousBtn = document.getElementById('hover-rot-continuous');
+    const rotTargetBtn = document.getElementById('hover-rot-target');
+    const rotContinuousControls = document.getElementById('hover-rot-continuous-controls');
+    const rotTargetControls = document.getElementById('hover-rot-target-controls');
+
+    if (rotContinuousBtn && rotTargetBtn) {
+        rotContinuousBtn.addEventListener('click', () => {
+            textData.hoverEffects.rotation.mode = 'continuous';
+            rotContinuousBtn.classList.add('active');
+            rotTargetBtn.classList.remove('active');
+            if (rotContinuousControls) rotContinuousControls.style.display = 'block';
+            if (rotTargetControls) rotTargetControls.style.display = 'none';
+        });
+
+        rotTargetBtn.addEventListener('click', () => {
+            textData.hoverEffects.rotation.mode = 'target';
+            rotTargetBtn.classList.add('active');
+            rotContinuousBtn.classList.remove('active');
+            if (rotTargetControls) rotTargetControls.style.display = 'block';
+            if (rotContinuousControls) rotContinuousControls.style.display = 'none';
+        });
+    }
+
+    // Rotation speed (continuous mode)
+    const rotSpeedInput = document.getElementById('hover-rot-speed');
+    const rotSpeedValue = document.getElementById('hover-rot-speed-value');
+    if (rotSpeedInput) {
+        rotSpeedInput.addEventListener('input', (e) => {
+            textData.hoverEffects.rotation.speed = parseFloat(e.target.value);
+            if (rotSpeedValue) rotSpeedValue.textContent = textData.hoverEffects.rotation.speed.toFixed(1);
+        });
+    }
+
+    // Rotation axis (continuous mode)
+    ['x', 'y', 'z'].forEach(axis => {
+        const input = document.getElementById(`hover-rot-axis-${axis}`);
+        const valueEl = document.getElementById(`hover-rot-axis-${axis}-value`);
+        if (input) {
+            input.addEventListener('input', (e) => {
+                textData.hoverEffects.rotation.axis[axis] = parseFloat(e.target.value);
+                if (valueEl) valueEl.textContent = parseFloat(e.target.value).toFixed(1);
+            });
+        }
+    });
+
+    // Target angles (target mode)
+    ['x', 'y', 'z'].forEach(axis => {
+        const input = document.getElementById(`hover-rot-target-${axis}`);
+        const valueEl = document.getElementById(`hover-rot-target-${axis}-value`);
+        if (input) {
+            input.addEventListener('input', (e) => {
+                textData.hoverEffects.rotation.targetAngle[axis] = parseInt(e.target.value);
+                if (valueEl) valueEl.textContent = e.target.value + '°';
+            });
+        }
+    });
+
+    // Material Crossfade toggle
+    const crossfadeToggle = document.getElementById('hover-crossfade-toggle');
+    const crossfadeControls = document.getElementById('hover-crossfade-controls');
+    if (crossfadeToggle) {
+        crossfadeToggle.addEventListener('toggle-change', (e) => {
+            textData.hoverEffects.materialCrossfade.enabled = e.detail.checked;
+            if (crossfadeControls) {
+                crossfadeControls.style.display = e.detail.checked ? 'block' : 'none';
+            }
+        });
+    }
+
+    // Hover matcap upload
+    const hoverMatcapUpload = document.getElementById('hover-matcap-upload');
+    const hoverMatcapPreview = document.getElementById('hover-matcap-preview');
+    const hoverMatcapInfo = document.getElementById('hover-matcap-info');
+    const hoverMatcapName = document.getElementById('hover-matcap-name');
+    const hoverMatcapUploadArea = document.getElementById('hover-matcap-upload-area');
+    const clearHoverMatcap = document.getElementById('clear-hover-matcap');
+
+    if (hoverMatcapUpload) {
+        hoverMatcapUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const THREE = window.THREE;
+                        const texture = new THREE.Texture(img);
+                        texture.needsUpdate = true;
+                        textData.hoverEffects.materialCrossfade.hoverMatcap = texture;
+                        if (hoverMatcapPreview) {
+                            hoverMatcapPreview.src = event.target.result;
+                            hoverMatcapPreview.style.display = 'block';
+                        }
+                        if (hoverMatcapInfo) hoverMatcapInfo.style.display = 'block';
+                        if (hoverMatcapName) hoverMatcapName.textContent = file.name;
+                        if (hoverMatcapUploadArea) hoverMatcapUploadArea.style.display = 'none';
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    // Clear hover matcap
+    if (clearHoverMatcap) {
+        clearHoverMatcap.addEventListener('click', () => {
+            textData.hoverEffects.materialCrossfade.hoverMatcap = null;
+            if (hoverMatcapInfo) hoverMatcapInfo.style.display = 'none';
+            if (hoverMatcapPreview) {
+                hoverMatcapPreview.src = '';
+                hoverMatcapPreview.style.display = 'none';
+            }
+            if (hoverMatcapUploadArea) hoverMatcapUploadArea.style.display = 'block';
+            if (hoverMatcapUpload) hoverMatcapUpload.value = '';
+        });
+    }
+
+    // Fallback color picker
+    const fallbackColorInput = document.getElementById('hover-fallback-color');
+    if (fallbackColorInput) {
+        fallbackColorInput.addEventListener('input', (e) => {
+            textData.hoverEffects.materialCrossfade.fallbackColor = e.target.value;
+        });
+    }
+
+    // Crossfade duration
+    const crossfadeDurationInput = document.getElementById('hover-crossfade-duration');
+    const crossfadeDurationValue = document.getElementById('hover-crossfade-duration-value');
+    if (crossfadeDurationInput) {
+        crossfadeDurationInput.addEventListener('input', (e) => {
+            textData.hoverEffects.materialCrossfade.transitionDuration = parseFloat(e.target.value);
+            if (crossfadeDurationValue) crossfadeDurationValue.textContent = e.target.value + 's';
         });
     }
 
     // Mouse tracking for hover effect AND look at mouse animation
     function needsMouseTracking() {
         // Track mouse if hover effect is enabled (in mouse mode) OR if animation is lookAtMouse
-        return (textData.hoverEffectEnabled && textData.interactionMode === 'mouse') ||
+        const hoverEnabled = textData.hoverEffectEnabled || textData.hoverEffects.enabled;
+        return (hoverEnabled && textData.interactionMode === 'mouse') ||
                textData.animationType === 'lookAtMouse';
     }
 
@@ -1923,22 +2547,32 @@ function setupEventListeners() {
         if (textData.interactionMode === 'mouse' && textData.animationType !== 'lookAtMouse') {
             textData.mouseX = null;
             textData.mouseY = null;
-            if (textData.hoverEffectEnabled && !textData.isAnimating) {
+            const hoverEnabled = textData.hoverEffectEnabled || textData.hoverEffects.enabled;
+            if (hoverEnabled && !textData.isAnimating) {
                 render();
             }
         }
     });
 
     // Hover rendering loop
+    let hoverLastTime = 0;
     function startHoverRendering() {
         stopHoverRendering();
 
-        if (textData.hoverEffectEnabled && !textData.isAnimating) {
+        const hoverEnabled = textData.hoverEffectEnabled || textData.hoverEffects.enabled;
+        if (hoverEnabled && !textData.isAnimating) {
+            hoverLastTime = performance.now();
+
             function hoverRenderLoop() {
-                if (!textData.hoverEffectEnabled || textData.isAnimating) {
+                const hoverActive = textData.hoverEffectEnabled || textData.hoverEffects.enabled;
+                if (!hoverActive || textData.isAnimating) {
                     hoverAnimationFrameId = null;
                     return;
                 }
+
+                const now = performance.now();
+                const deltaTime = (now - hoverLastTime) / 1000;
+                hoverLastTime = now;
 
                 if (textData.interactionMode === 'auto') {
                     textData.autoTime += 16;
@@ -1947,7 +2581,7 @@ function setupEventListeners() {
                     textData.mouseY = autoPos.y;
                 }
 
-                render();
+                render(0, deltaTime);
                 hoverAnimationFrameId = requestAnimationFrame(hoverRenderLoop);
             }
             hoverAnimationFrameId = requestAnimationFrame(hoverRenderLoop);
