@@ -761,7 +761,6 @@
                             <select class="chatooly-select" id="source-mode">
                                 <option value="text" selected>Text</option>
                                 <option value="shape">Shape</option>
-                                <option value="svg">Custom SVG</option>
                             </select>
                         </div>
 
@@ -794,44 +793,24 @@
                                     <button class="chatooly-btn" id="fill-mode-fill" data-mode="fill">Fill</button>
                                 </div>
                             </div>
-                        </div>
 
-                        <!-- SVG Mode Controls -->
-                        <div id="svg-source-controls" style="display: none;">
-                            <div class="chatooly-upload-area" id="svg-upload-area" style="height: 80px;">
-                                <div class="chatooly-upload-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                        <polyline points="14 2 14 8 20 8"></polyline>
-                                    </svg>
+                            <!-- Position X and Y side by side -->
+                            <div style="display: flex; gap: 12px; margin-top: 12px;">
+                                <div class="chatooly-slider-group" style="flex: 1;">
+                                    <div class="chatooly-slider-label">
+                                        <span>Position X</span>
+                                        <span class="chatooly-slider-value" id="shape-offset-x-value">0</span>
+                                    </div>
+                                    <input type="range" class="chatooly-slider" id="shape-offset-x" min="-50" max="50" step="1" value="0">
                                 </div>
-                                <div class="chatooly-upload-text">Upload SVG File</div>
-                                <input type="file" class="chatooly-upload-input" id="svg-upload" accept=".svg">
-                            </div>
 
-                            <div id="svg-info" style="display: none; margin-top: 8px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--chatooly-color-bg-secondary); border-radius: 4px;">
-                                    <span id="svg-name" style="font-size: 12px; color: var(--chatooly-color-text);"></span>
-                                    <button class="chatooly-btn" id="clear-svg" style="padding: 4px 8px; font-size: 11px;">Clear</button>
+                                <div class="chatooly-slider-group" style="flex: 1;">
+                                    <div class="chatooly-slider-label">
+                                        <span>Position Y</span>
+                                        <span class="chatooly-slider-value" id="shape-offset-y-value">0</span>
+                                    </div>
+                                    <input type="range" class="chatooly-slider" id="shape-offset-y" min="-50" max="50" step="1" value="0">
                                 </div>
-                            </div>
-
-                            <div class="chatooly-input-group" style="margin-top: 12px;">
-                                <label class="chatooly-input-label">Sample Mode</label>
-                                <select class="chatooly-select" id="svg-sample-mode">
-                                    <option value="outline" selected>Outline Only</option>
-                                    <option value="fill">Fill Only</option>
-                                    <option value="both">Outline + Fill</option>
-                                </select>
-                            </div>
-
-                            <div class="chatooly-input-group">
-                                <label class="chatooly-input-label">Fit Mode</label>
-                                <select class="chatooly-select" id="svg-fit-mode">
-                                    <option value="contain" selected>Contain</option>
-                                    <option value="cover">Cover</option>
-                                    <option value="stretch">Stretch</option>
-                                </select>
                             </div>
                         </div>
 
@@ -1479,9 +1458,8 @@
     <!-- ========== MatCap Generator (for gradient shader materials) ========== -->
     <script src="js/matcap-generator.js"></script>
 
-    <!-- ========== SVG and Shape Point Generation ========== -->
+    <!-- ========== Shape Point Generation ========== -->
     <script src="js/svg/ParametricShapes.js"></script>
-    <script src="js/svg/SVGPointSampler.js"></script>
 
     <!-- ========== DO NOT EDIT: Your Tool Logic ========== -->
     <script src="js/main.js"></script>

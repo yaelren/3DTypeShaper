@@ -28,16 +28,13 @@ let particlePositions = [];
 // ========== STATE MANAGEMENT ==========
 let textData = {
     // Source mode settings
-    sourceMode: 'text',              // 'text' | 'shape' | 'svg'
+    sourceMode: 'text',              // 'text' | 'shape'
     // Predefined shapes
     spawnShapeType: 'circle',        // 'circle' | 'square' | 'triangle' | 'star' | 'heart' | 'hexagon'
     spawnShapeSize: 200,             // Size in pixels (50-500)
     shapeFillMode: 'outline',        // 'outline' | 'fill'
-    // SVG settings
-    svgData: null,                   // Parsed SVG data object
-    svgFileName: null,               // Original filename
-    svgSampleMode: 'outline',        // 'outline' | 'fill' | 'both'
-    svgFitMode: 'contain',           // 'contain' | 'cover' | 'stretch'
+    shapeOffsetX: 0,                 // Position offset X (-50 to 50)
+    shapeOffsetY: 0,                 // Position offset Y (-50 to 50)
 
     // Text settings
     text: '3D Type Shaper',
@@ -548,50 +545,6 @@ function getTextPoints(text, fontSize, spacing) {
     }
 
     return points;
-}
-
-// ========== SVG SHAPE POINTS ==========
-function getSVGShapePoints(spacing, canvasSize) {
-    if (!textData.svgData || !window.SVGPointSampler || !window.SVGCoordinateNormalizer) {
-        return [];
-    }
-
-    const sampler = new SVGPointSampler();
-
-    try {
-        // Sample points based on mode
-        const rawPoints = sampler.sampleAllPaths(textData.svgData, spacing, {
-            includeOutline: textData.svgSampleMode !== 'fill',
-            includeFill: textData.svgSampleMode !== 'outline',
-            mergeOverlapping: true
-        });
-
-        // Normalize to canvas coordinates
-        const normalizedPoints = SVGCoordinateNormalizer.normalize(
-            rawPoints,
-            textData.svgData.viewBox,
-            canvasSize,
-            {
-                fitMode: textData.svgFitMode,
-                padding: 0.1,
-                offsetX: textData.textOffsetX,
-                offsetY: textData.textOffsetY
-            }
-        );
-
-        // Apply point limit for performance
-        const maxPoints = 10000;
-        if (normalizedPoints.length > maxPoints) {
-            console.warn(`SVG has ${normalizedPoints.length} points, limiting to ${maxPoints}`);
-            // Keep every Nth point
-            const step = Math.ceil(normalizedPoints.length / maxPoints);
-            return normalizedPoints.filter((_, i) => i % step === 0);
-        }
-
-        return normalizedPoints;
-    } finally {
-        sampler.cleanup();
-    }
 }
 
 // ========== GEOMETRY CREATION ==========
@@ -1115,17 +1068,18 @@ function rebuildParticleSystem() {
                     textData.shapeFillMode,
                     canvasSize
                 );
+                // Apply position offset
+                if (textData.shapeOffsetX !== 0 || textData.shapeOffsetY !== 0) {
+                    const offsetX = (textData.shapeOffsetX / 100) * canvasSize.width;
+                    const offsetY = (textData.shapeOffsetY / 100) * canvasSize.height;
+                    cachedPoints = cachedPoints.map(p => ({
+                        x: p.x + offsetX,
+                        y: p.y - offsetY, // Negative because Y is flipped in 3D
+                        z: p.z || 0
+                    }));
+                }
             } else {
                 console.warn('ParametricShapes not loaded');
-                cachedPoints = [];
-            }
-            break;
-
-        case 'svg':
-            // Use uploaded SVG
-            if (textData.svgData && window.SVGPointSampler) {
-                cachedPoints = getSVGShapePoints(spacing, canvasSize);
-            } else {
                 cachedPoints = [];
             }
             break;
@@ -1925,7 +1879,6 @@ function setupEventListeners() {
     // ========== SOURCE MODE CONTROLS ==========
     const sourceModeSelect = document.getElementById('source-mode');
     const shapeSourceControls = document.getElementById('shape-source-controls');
-    const svgSourceControls = document.getElementById('svg-source-controls');
     const textSourceControls = document.getElementById('text-source-controls');
 
     if (sourceModeSelect) {
@@ -1934,7 +1887,6 @@ function setupEventListeners() {
 
             // Show/hide relevant controls inside SOURCE section
             if (shapeSourceControls) shapeSourceControls.style.display = textData.sourceMode === 'shape' ? 'block' : 'none';
-            if (svgSourceControls) svgSourceControls.style.display = textData.sourceMode === 'svg' ? 'block' : 'none';
             if (textSourceControls) textSourceControls.style.display = textData.sourceMode === 'text' ? 'block' : 'none';
 
             traceIndex = 0;
@@ -1984,60 +1936,24 @@ function setupEventListeners() {
         });
     }
 
-    // SVG upload
-    const svgUploadInput = document.getElementById('svg-upload');
-    const svgInfo = document.getElementById('svg-info');
-    const svgName = document.getElementById('svg-name');
-    const clearSvgBtn = document.getElementById('clear-svg');
-
-    if (svgUploadInput) {
-        svgUploadInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            try {
-                const parser = new SVGShapeParser();
-                textData.svgData = await parser.parse(file);
-                textData.svgFileName = file.name;
-
-                if (svgInfo) svgInfo.style.display = 'block';
-                if (svgName) svgName.textContent = file.name;
-
-                traceIndex = 0;
-                rebuildParticleSystem();
-            } catch (err) {
-                console.error('SVG parsing error:', err);
-                alert('Error parsing SVG: ' + err.message);
-            }
-        });
-    }
-
-    if (clearSvgBtn) {
-        clearSvgBtn.addEventListener('click', () => {
-            textData.svgData = null;
-            textData.svgFileName = null;
-            if (svgInfo) svgInfo.style.display = 'none';
-            if (svgUploadInput) svgUploadInput.value = '';
+    // Shape position offsets
+    const shapeOffsetXInput = document.getElementById('shape-offset-x');
+    const shapeOffsetXValue = document.getElementById('shape-offset-x-value');
+    if (shapeOffsetXInput) {
+        shapeOffsetXInput.addEventListener('input', (e) => {
+            textData.shapeOffsetX = parseInt(e.target.value);
+            if (shapeOffsetXValue) shapeOffsetXValue.textContent = textData.shapeOffsetX;
             traceIndex = 0;
             rebuildParticleSystem();
         });
     }
 
-    // SVG sample mode
-    const svgSampleModeSelect = document.getElementById('svg-sample-mode');
-    if (svgSampleModeSelect) {
-        svgSampleModeSelect.addEventListener('change', (e) => {
-            textData.svgSampleMode = e.target.value;
-            traceIndex = 0;
-            rebuildParticleSystem();
-        });
-    }
-
-    // SVG fit mode
-    const svgFitModeSelect = document.getElementById('svg-fit-mode');
-    if (svgFitModeSelect) {
-        svgFitModeSelect.addEventListener('change', (e) => {
-            textData.svgFitMode = e.target.value;
+    const shapeOffsetYInput = document.getElementById('shape-offset-y');
+    const shapeOffsetYValue = document.getElementById('shape-offset-y-value');
+    if (shapeOffsetYInput) {
+        shapeOffsetYInput.addEventListener('input', (e) => {
+            textData.shapeOffsetY = parseInt(e.target.value);
+            if (shapeOffsetYValue) shapeOffsetYValue.textContent = textData.shapeOffsetY;
             traceIndex = 0;
             rebuildParticleSystem();
         });
