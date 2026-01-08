@@ -1540,22 +1540,17 @@ function getHoverScale3D(pointX, pointY) {
 
     // Calculate scale factor
     const normalizedDistance = distance / radius;
-    let scale;
 
     // Use new intensity if new system enabled, otherwise legacy
+    // Intensity is now a direct scale multiplier (e.g., 2.0 = 200%, 0.01 = 1%)
     const intensity = textData.hoverEffects.enabled
         ? textData.hoverEffects.magnification.intensity
         : textData.hoverIntensity;
 
-    if (intensity >= 1.0) {
-        scale = 1.0 + (intensity - 1.0) * (1 - normalizedDistance);
-    } else {
-        const shrinkAmount = Math.abs(intensity);
-        const minScale = Math.max(0.1, 1.0 / (shrinkAmount + 1));
-        scale = 1.0 - (1.0 - minScale) * (1 - normalizedDistance);
-    }
+    // Lerp from 1.0 (no effect at edge) to intensity (full effect at center)
+    const scale = 1.0 + (intensity - 1.0) * (1 - normalizedDistance);
 
-    return Math.max(0.1, scale);
+    return Math.max(0.01, scale);
 }
 
 /**
@@ -2712,14 +2707,16 @@ function setupEventListeners() {
         });
     }
 
-    // Hover intensity (magnification intensity)
+    // Hover intensity (magnification intensity) - now in percentage (1-700%)
     const hoverIntensityInput = document.getElementById('hover-intensity');
     const hoverIntensityValue = document.getElementById('hover-intensity-value');
     if (hoverIntensityInput) {
         hoverIntensityInput.addEventListener('input', (e) => {
-            textData.hoverIntensity = parseFloat(e.target.value);
-            textData.hoverEffects.magnification.intensity = parseFloat(e.target.value);
-            if (hoverIntensityValue) hoverIntensityValue.textContent = textData.hoverIntensity.toFixed(1);
+            const percentage = parseFloat(e.target.value);
+            const decimal = percentage / 100; // Convert 200% to 2.0
+            textData.hoverIntensity = decimal;
+            textData.hoverEffects.magnification.intensity = decimal;
+            if (hoverIntensityValue) hoverIntensityValue.textContent = percentage + '%';
         });
     }
 
