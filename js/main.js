@@ -125,7 +125,7 @@ let textData = {
                 ],
                 type: 'radial'
             },
-            transitionDuration: 0.3,   // Seconds to crossfade
+            transitionDuration: 0,   // Instant crossfade
         }
     },
     // Legacy hover properties (for backwards compatibility)
@@ -1931,16 +1931,16 @@ function setupEventListeners() {
     const sourceModeSelect = document.getElementById('source-mode');
     const shapeSourceControls = document.getElementById('shape-source-controls');
     const svgSourceControls = document.getElementById('svg-source-controls');
-    const textSection = document.querySelector('[data-section="text"]');
+    const textSourceControls = document.getElementById('text-source-controls');
 
     if (sourceModeSelect) {
         sourceModeSelect.addEventListener('change', (e) => {
             textData.sourceMode = e.target.value;
 
-            // Show/hide relevant controls
+            // Show/hide relevant controls inside SOURCE section
             if (shapeSourceControls) shapeSourceControls.style.display = textData.sourceMode === 'shape' ? 'block' : 'none';
             if (svgSourceControls) svgSourceControls.style.display = textData.sourceMode === 'svg' ? 'block' : 'none';
-            if (textSection) textSection.style.display = textData.sourceMode === 'text' ? 'block' : 'none';
+            if (textSourceControls) textSourceControls.style.display = textData.sourceMode === 'text' ? 'block' : 'none';
 
             traceIndex = 0;
             rebuildParticleSystem();
@@ -2413,6 +2413,34 @@ function setupEventListeners() {
     }
 
     // ========== ANIMATION CONTROLS (Unified for all shapes) ==========
+
+    // Animation Mode Toggle (Static / Animated)
+    const animationModeStatic = document.getElementById('animation-mode-static');
+    const animationModeAnimated = document.getElementById('animation-mode-animated');
+    const animatedModeControls = document.getElementById('animated-mode-controls');
+
+    if (animationModeStatic && animationModeAnimated) {
+        animationModeStatic.addEventListener('click', () => {
+            animationModeStatic.classList.add('active');
+            animationModeAnimated.classList.remove('active');
+            if (animatedModeControls) animatedModeControls.style.display = 'none';
+            textData.animationType = 'none';
+            stopShapeAnimation();
+        });
+
+        animationModeAnimated.addEventListener('click', () => {
+            animationModeAnimated.classList.add('active');
+            animationModeStatic.classList.remove('active');
+            if (animatedModeControls) animatedModeControls.style.display = 'block';
+            // Default to rotate when switching to animated
+            const animationTypeSelect = document.getElementById('animation-type');
+            if (animationTypeSelect) {
+                textData.animationType = animationTypeSelect.value;
+            }
+            startShapeAnimation();
+        });
+    }
+
     const animationTypeSelect = document.getElementById('animation-type');
     const rotateSpeedGroup = document.getElementById('rotate-speed-group');
     const tumbleControlsGroup = document.getElementById('tumble-controls-group');
@@ -2425,12 +2453,8 @@ function setupEventListeners() {
             if (rotateSpeedGroup) rotateSpeedGroup.style.display = textData.animationType === 'rotate' ? 'block' : 'none';
             if (tumbleControlsGroup) tumbleControlsGroup.style.display = textData.animationType === 'tumble' ? 'block' : 'none';
 
-            // Start or stop animation
-            if (textData.animationType !== 'none') {
-                startShapeAnimation();
-            } else {
-                stopShapeAnimation();
-            }
+            // Restart animation with new type
+            startShapeAnimation();
         });
     }
 
@@ -2819,46 +2843,90 @@ function setupEventListeners() {
         });
     }
 
-    // Hover gradient color pickers
-    const hoverGradientStart = document.getElementById('hover-gradient-start');
-    const hoverGradientMid = document.getElementById('hover-gradient-mid');
-    const hoverGradientEnd = document.getElementById('hover-gradient-end');
+    // Hover gradient stops (matching the main gradient UI style)
+    const hoverGradientStopsContainer = document.getElementById('hover-gradient-stops-container');
+    const hoverGradientPreview = document.getElementById('hover-gradient-preview');
 
-    function updateHoverGradient() {
-        if (hoverGradientStart && hoverGradientMid && hoverGradientEnd) {
-            textData.hoverEffects.materialCrossfade.hoverGradient.stops = [
-                { color: hoverGradientStart.value, position: 0 },
-                { color: hoverGradientMid.value, position: 50 },
-                { color: hoverGradientEnd.value, position: 100 }
-            ];
-            // Rebuild lerp materials if crossfade is enabled
-            if (textData.hoverEffects.materialCrossfade.enabled && textData.materialType === 'gradient') {
-                initLerpMaterials();
-                initLerpMeshes();
-                render();
+    function updateHoverGradientFromStops() {
+        if (!hoverGradientStopsContainer) return;
+
+        const stops = [];
+        const stopElements = hoverGradientStopsContainer.querySelectorAll('.gradient-stop');
+
+        stopElements.forEach((stopEl, index) => {
+            const colorInput = stopEl.querySelector('.hover-gradient-stop-color');
+            const positionInput = stopEl.querySelector('.hover-gradient-stop-position');
+            if (colorInput && positionInput) {
+                stops.push({
+                    color: colorInput.value,
+                    position: parseInt(positionInput.value)
+                });
             }
+        });
+
+        textData.hoverEffects.materialCrossfade.hoverGradient.stops = stops;
+
+        // Update hover gradient preview canvas
+        updateHoverGradientPreview();
+
+        // Rebuild lerp materials if crossfade is enabled
+        if (textData.hoverEffects.materialCrossfade.enabled && textData.materialType === 'gradient') {
+            initLerpMaterials();
+            initLerpMeshes();
+            render();
         }
     }
 
-    if (hoverGradientStart) {
-        hoverGradientStart.addEventListener('input', updateHoverGradient);
-    }
-    if (hoverGradientMid) {
-        hoverGradientMid.addEventListener('input', updateHoverGradient);
-    }
-    if (hoverGradientEnd) {
-        hoverGradientEnd.addEventListener('input', updateHoverGradient);
+    function updateHoverGradientPreview() {
+        if (!hoverGradientPreview) return;
+
+        const ctx = hoverGradientPreview.getContext('2d');
+        const width = hoverGradientPreview.width;
+        const height = hoverGradientPreview.height;
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const radius = Math.min(width, height) / 2;
+
+        ctx.clearRect(0, 0, width, height);
+
+        const stops = textData.hoverEffects.materialCrossfade.hoverGradient.stops;
+        const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+
+        stops.forEach(stop => {
+            gradient.addColorStop(stop.position / 100, stop.color);
+        });
+
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
     }
 
-    // Crossfade duration
-    const crossfadeDurationInput = document.getElementById('hover-crossfade-duration');
-    const crossfadeDurationValue = document.getElementById('hover-crossfade-duration-value');
-    if (crossfadeDurationInput) {
-        crossfadeDurationInput.addEventListener('input', (e) => {
-            textData.hoverEffects.materialCrossfade.transitionDuration = parseFloat(e.target.value);
-            if (crossfadeDurationValue) crossfadeDurationValue.textContent = e.target.value + 's';
+    // Setup event listeners for hover gradient stops
+    if (hoverGradientStopsContainer) {
+        const stopElements = hoverGradientStopsContainer.querySelectorAll('.gradient-stop');
+        stopElements.forEach((stopEl) => {
+            const colorInput = stopEl.querySelector('.hover-gradient-stop-color');
+            const positionInput = stopEl.querySelector('.hover-gradient-stop-position');
+            const positionValue = stopEl.querySelector('.hover-gradient-stop-value');
+
+            if (colorInput) {
+                colorInput.addEventListener('input', updateHoverGradientFromStops);
+            }
+            if (positionInput) {
+                positionInput.addEventListener('input', (e) => {
+                    if (positionValue) positionValue.textContent = e.target.value + '%';
+                    updateHoverGradientFromStops();
+                });
+            }
         });
+
+        // Initial preview render
+        updateHoverGradientPreview();
     }
+
+    // Crossfade transition duration - now instant (0)
+    textData.hoverEffects.materialCrossfade.transitionDuration = 0;
 
     // Mouse tracking for hover effect AND look at mouse animation
     function needsMouseTracking() {
