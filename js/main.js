@@ -113,11 +113,18 @@ let textData = {
             targetAngle: { x: 0, y: 180, z: 0 },  // For target mode (degrees)
             axis: { x: 0, y: 1, z: 0 },
         },
-        // Material crossfade effect
+        // Material crossfade effect (gradient mode only)
         materialCrossfade: {
             enabled: false,
-            hoverMatcap: null,         // Matcap texture (if uploaded)
-            fallbackColor: '#ffffff',  // Color picker fallback
+            // Hover gradient (crossfade target for gradient materials)
+            hoverGradient: {
+                stops: [
+                    { color: '#ffffff', position: 0 },
+                    { color: '#ffcc00', position: 50 },
+                    { color: '#ff6600', position: 100 }
+                ],
+                type: 'radial'
+            },
             transitionDuration: 0.3,   // Seconds to crossfade
         }
     },
@@ -163,6 +170,16 @@ let matcapGenerator = null;
 
 // Gradient material
 let gradientMaterial = null;
+
+// ========== GRADIENT CROSSFADE LERP SYSTEM ==========
+// Pre-generated intermediate gradient materials for smooth hover crossfade
+let lerpMaterials = [];  // Array of { material, texture } for lerp sequence
+let lerpMeshes = [];     // Array of InstancedMesh, one per lerp material
+let lerpMaterialsReady = false;
+const LERP_STEPS = 5;  // Number of intermediate steps between base and hover gradient
+
+// Per-particle lerp assignment tracking
+let particleLerpIndices = [];  // Which lerp material each particle uses
 
 // Per-particle rotation data (for facing behavior and animation)
 let particleRotations = [];
@@ -749,6 +766,298 @@ function updateGradientMaterial() {
     render();
 }
 
+// ========== GRADIENT CROSSFADE LERP SYSTEM ==========
+// Helper: Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : { r: 0, g: 0, b: 0 };
+}
+
+// Helper: Convert RGB to hex
+function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(x => {
+        const hex = Math.round(x).toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+    }).join('');
+}
+
+// Interpolate between two gradient stop arrays
+function interpolateGradientStops(stopsA, stopsB, ratio) {
+    const result = [];
+    const numStops = Math.max(stopsA.length, stopsB.length);
+
+    for (let i = 0; i < numStops; i++) {
+        const stopA = stopsA[Math.min(i, stopsA.length - 1)];
+        const stopB = stopsB[Math.min(i, stopsB.length - 1)];
+
+        // Parse hex colors to RGB
+        const colorA = hexToRgb(stopA.color);
+        const colorB = hexToRgb(stopB.color);
+
+        // Interpolate colors
+        const r = colorA.r + (colorB.r - colorA.r) * ratio;
+        const g = colorA.g + (colorB.g - colorA.g) * ratio;
+        const b = colorA.b + (colorB.b - colorA.b) * ratio;
+
+        // Interpolate positions
+        const position = stopA.position + (stopB.position - stopA.position) * ratio;
+
+        result.push({
+            color: rgbToHex(r, g, b),
+            position: position
+        });
+    }
+
+    return result;
+}
+
+// Initialize lerp materials for gradient crossfade
+function initLerpMaterials() {
+    if (!matcapGenerator || textData.materialType !== 'gradient') {
+        lerpMaterialsReady = false;
+        return;
+    }
+
+    const THREE = window.THREE;
+
+    // Clean up existing lerp materials
+    cleanupLerpMaterials();
+
+    const baseGradient = textData.gradientSets[textData.activeGradientIndex] || textData.gradientSets[0];
+    const hoverGradient = textData.hoverEffects.materialCrossfade.hoverGradient;
+
+    // Generate sequence from base to hover gradient
+    // Total: LERP_STEPS + 1 materials (base at 0, hover at end)
+    for (let i = 0; i <= LERP_STEPS; i++) {
+        const ratio = i / LERP_STEPS;
+        const interpolatedStops = interpolateGradientStops(baseGradient.stops, hoverGradient.stops, ratio);
+
+        // Generate matcap texture for this interpolation step
+        const texture = matcapGenerator.generate(
+            interpolatedStops,
+            baseGradient.type,  // Use base gradient type
+            textData.lightPosition
+        );
+
+        // Create material with same shader modifications as main gradient
+        const material = new THREE.MeshMatcapMaterial({
+            matcap: texture,
+            side: THREE.DoubleSide,
+            flatShading: textData.shaderMode === 'toon'
+        });
+
+        // Add rim light shader modifications (same as createGradientMaterial)
+        material.onBeforeCompile = (shader) => {
+            shader.uniforms.rimColor = { value: new THREE.Color(textData.rimColor) };
+            shader.uniforms.rimIntensity = { value: textData.rimEnabled ? textData.rimIntensity : 0 };
+            shader.uniforms.lightColor = { value: new THREE.Color(textData.lightColor) };
+            shader.uniforms.lightIntensity = { value: textData.lightIntensity };
+            shader.uniforms.toonMode = { value: textData.shaderMode === 'toon' ? 1 : 0 };
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <common>',
+                `#include <common>
+                uniform vec3 rimColor;
+                uniform float rimIntensity;
+                uniform vec3 lightColor;
+                uniform float lightIntensity;
+                uniform int toonMode;`
+            );
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <opaque_fragment>',
+                `outgoingLight *= lightColor * lightIntensity;
+                if (toonMode == 1) {
+                    outgoingLight = floor(outgoingLight * 4.0) / 4.0;
+                }
+                vec3 rimViewDir = normalize(vViewPosition);
+                float rimFactor = 1.0 - max(0.0, dot(normal, rimViewDir));
+                rimFactor = pow(rimFactor, 2.0);
+                outgoingLight += rimColor * rimFactor * rimIntensity;
+                #include <opaque_fragment>`
+            );
+
+            material.userData.shader = shader;
+        };
+
+        lerpMaterials.push({
+            material: material,
+            texture: texture,
+            ratio: ratio
+        });
+    }
+
+    lerpMaterialsReady = lerpMaterials.length > 0;
+    console.log('3D Type Shaper: Lerp materials initialized with', lerpMaterials.length, 'steps');
+}
+
+// Clean up lerp materials
+function cleanupLerpMaterials() {
+    lerpMaterials.forEach(({ material, texture }) => {
+        if (texture) texture.dispose();
+        if (material) material.dispose();
+    });
+    lerpMaterials = [];
+    lerpMaterialsReady = false;
+}
+
+// Get lerp material index for a given hover progress (0 = base, 1 = hover)
+function getLerpMaterialIndex(hoverProgress) {
+    if (!lerpMaterialsReady || lerpMaterials.length === 0) {
+        return 0;
+    }
+    // Map progress to material index
+    return Math.min(Math.floor(hoverProgress * LERP_STEPS), LERP_STEPS);
+}
+
+// Initialize lerp meshes (one InstancedMesh per lerp material)
+function initLerpMeshes() {
+    if (!lerpMaterialsReady || !currentGeometry || cachedPoints.length === 0) return;
+
+    const THREE = window.THREE;
+
+    // Clean up existing lerp meshes
+    cleanupLerpMeshes();
+
+    // Create one InstancedMesh per lerp material
+    // Each mesh holds all particles but renders with its specific material
+    lerpMaterials.forEach((lerpData, index) => {
+        const mesh = new THREE.InstancedMesh(
+            currentGeometry,
+            lerpData.material,
+            cachedPoints.length
+        );
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.visible = index === 0;  // Only base material visible initially
+
+        // Initialize all particles with zero scale (invisible)
+        const tempDummy = new THREE.Object3D();
+        tempDummy.scale.set(0, 0, 0);
+        tempDummy.updateMatrix();
+        for (let i = 0; i < cachedPoints.length; i++) {
+            mesh.setMatrixAt(i, tempDummy.matrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+
+        scene.add(mesh);
+        lerpMeshes.push(mesh);
+    });
+
+    // Initialize particle lerp indices (all start at 0 = base material)
+    particleLerpIndices = new Array(cachedPoints.length).fill(0);
+
+    console.log('3D Type Shaper: Lerp meshes initialized:', lerpMeshes.length);
+}
+
+// Clean up lerp meshes
+function cleanupLerpMeshes() {
+    lerpMeshes.forEach(mesh => {
+        scene.remove(mesh);
+        // Don't dispose geometry - it's shared with main instancedMesh
+    });
+    lerpMeshes = [];
+    particleLerpIndices = [];
+}
+
+// Update lerp mesh visibility based on particle hover progress
+function updateLerpMeshes(deltaTime = 0) {
+    if (!lerpMaterialsReady || lerpMeshes.length === 0 || particlePositions.length === 0 || !dummy) return;
+
+    const THREE = window.THREE;
+    const hoverEnabled = textData.hoverEffects.enabled;
+    const crossfadeEnabled = textData.hoverEffects.materialCrossfade.enabled;
+
+    if (!hoverEnabled || !crossfadeEnabled || textData.materialType !== 'gradient') {
+        // Ensure only base mesh is visible
+        lerpMeshes.forEach((mesh, i) => {
+            mesh.visible = i === 0;
+        });
+        return;
+    }
+
+    // Track particle counts per lerp index for visibility
+    const particlesPerLerp = new Array(lerpMeshes.length).fill(0);
+
+    // Update particle assignments and matrices
+    for (let i = 0; i < particlePositions.length; i++) {
+        const p = particlePositions[i];
+        const rot = particleRotations[i] || { x: 0, y: 0, z: 0, spinOffsetX: 0, spinOffsetY: 0, spinOffsetZ: 0 };
+
+        // Get hover progress for this particle
+        const hoverProgress = getHoverProgress(p.x, p.y);
+        const newLerpIndex = getLerpMaterialIndex(hoverProgress);
+        const oldLerpIndex = particleLerpIndices[i];
+
+        // Calculate transform
+        let scale = p.baseScale * textData.shapeSize;
+
+        // Apply magnification if enabled
+        if (textData.hoverEffects.magnification.enabled) {
+            scale *= getHoverScale3D(p.x, p.y);
+        }
+
+        // Update particle in the correct lerp mesh
+        dummy.position.set(p.x, p.y, p.z);
+
+        // Apply rotation
+        let finalRotX = rot.x + rot.spinOffsetX;
+        let finalRotY = rot.y + rot.spinOffsetY;
+        let finalRotZ = rot.z + rot.spinOffsetZ;
+
+        // Hover rotation effect
+        if (textData.hoverEffects.rotation.enabled && hoverProgress > 0) {
+            const rotMode = textData.hoverEffects.rotation.mode;
+            const DEG2RAD = Math.PI / 180;
+
+            if (rotMode === 'continuous') {
+                const axis = textData.hoverEffects.rotation.axis;
+                const speed = textData.hoverEffects.rotation.speed;
+                rot.spinOffsetX += axis.x * speed * deltaTime * hoverProgress;
+                rot.spinOffsetY += axis.y * speed * deltaTime * hoverProgress;
+                rot.spinOffsetZ += axis.z * speed * deltaTime * hoverProgress;
+            } else if (rotMode === 'target') {
+                const target = textData.hoverEffects.rotation.targetAngle;
+                finalRotX = THREE.MathUtils.lerp(rot.x, target.x * DEG2RAD, hoverProgress);
+                finalRotY = THREE.MathUtils.lerp(rot.y, target.y * DEG2RAD, hoverProgress);
+                finalRotZ = THREE.MathUtils.lerp(rot.z, target.z * DEG2RAD, hoverProgress);
+            }
+        }
+
+        dummy.rotation.set(finalRotX, finalRotY, finalRotZ);
+        dummy.scale.setScalar(scale);
+        dummy.updateMatrix();
+
+        // If lerp index changed, update both old and new meshes
+        if (newLerpIndex !== oldLerpIndex) {
+            // Hide in old mesh (scale 0)
+            if (oldLerpIndex < lerpMeshes.length) {
+                const oldDummy = new THREE.Object3D();
+                oldDummy.scale.set(0, 0, 0);
+                oldDummy.updateMatrix();
+                lerpMeshes[oldLerpIndex].setMatrixAt(i, oldDummy.matrix);
+                lerpMeshes[oldLerpIndex].instanceMatrix.needsUpdate = true;
+            }
+            particleLerpIndices[i] = newLerpIndex;
+        }
+
+        // Show in current mesh
+        if (newLerpIndex < lerpMeshes.length) {
+            lerpMeshes[newLerpIndex].setMatrixAt(i, dummy.matrix);
+            lerpMeshes[newLerpIndex].instanceMatrix.needsUpdate = true;
+            particlesPerLerp[newLerpIndex]++;
+        }
+    }
+
+    // Update mesh visibility based on particle counts
+    lerpMeshes.forEach((mesh, i) => {
+        mesh.visible = particlesPerLerp[i] > 0;
+    });
+}
+
 // ========== CUSTOM MATCAP UPLOAD HANDLER ==========
 function handleMatcapUpload(file) {
     const THREE = window.THREE;
@@ -842,6 +1151,10 @@ function rebuildParticleSystem() {
         return;
     }
 
+    // Clean up existing lerp meshes first
+    cleanupLerpMeshes();
+    cleanupLerpMaterials();
+
     // Remove existing mesh
     if (instancedMesh) {
         scene.remove(instancedMesh);
@@ -862,8 +1175,11 @@ function rebuildParticleSystem() {
     instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     // Initialize instance colors for material crossfade effect
+    // Only use non-white colors for solid material type with crossfade enabled
+    // For gradient/matcap materials, use white (1,1,1) so colors don't interfere
     const colors = new Float32Array(cachedPoints.length * 3);
-    const baseColor = new THREE.Color(textData.shapeColor);
+    const useBaseColor = textData.materialType === 'solid';
+    const baseColor = useBaseColor ? new THREE.Color(textData.shapeColor) : new THREE.Color(0xffffff);
     for (let i = 0; i < cachedPoints.length; i++) {
         colors[i * 3] = baseColor.r;
         colors[i * 3 + 1] = baseColor.g;
@@ -923,6 +1239,17 @@ function rebuildParticleSystem() {
     updateInstancedMesh();
     scene.add(instancedMesh);
 
+    // Initialize lerp materials for gradient crossfade if enabled
+    if (textData.materialType === 'gradient' &&
+        textData.hoverEffects.enabled &&
+        textData.hoverEffects.materialCrossfade.enabled) {
+        initLerpMaterials();
+        initLerpMeshes();
+    } else {
+        cleanupLerpMeshes();
+        cleanupLerpMaterials();
+    }
+
     // Start animation if needed (for any shape type)
     if (textData.animationType !== 'none') {
         startShapeAnimation();
@@ -948,9 +1275,11 @@ function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
     if (!_hoverColor) _hoverColor = new THREE.Color();
     if (!_blendedColor) _blendedColor = new THREE.Color();
 
-    // Check if crossfade is active
+    // Check if crossfade is active (only for solid material type)
+    // Gradient and matcap materials don't support color crossfade
     const crossfadeActive = textData.hoverEffects.enabled &&
                            textData.hoverEffects.materialCrossfade.enabled &&
+                           textData.materialType === 'solid' &&
                            instancedMesh.instanceColor;
 
     // Pre-compute colors for crossfade
@@ -1450,8 +1779,26 @@ function clearCanvas() {
 function render(rotationAngle = 0, deltaTime = 0.016) {
     if (!renderer || !scene || !camera) return;
 
-    // Update instanced mesh with deltaTime for hover rotation effects
-    updateInstancedMesh(rotationAngle, deltaTime);
+    // Check if gradient crossfade is active
+    const gradientCrossfadeActive = textData.materialType === 'gradient' &&
+                                    textData.hoverEffects.enabled &&
+                                    textData.hoverEffects.materialCrossfade.enabled &&
+                                    lerpMaterialsReady &&
+                                    lerpMeshes.length > 0;
+
+    if (gradientCrossfadeActive) {
+        // Hide main instanced mesh when using lerp meshes
+        if (instancedMesh) instancedMesh.visible = false;
+
+        // Update lerp meshes instead
+        updateLerpMeshes(deltaTime);
+    } else {
+        // Show main instanced mesh
+        if (instancedMesh) instancedMesh.visible = true;
+
+        // Update instanced mesh with deltaTime for hover rotation effects
+        updateInstancedMesh(rotationAngle, deltaTime);
+    }
 
     // Render scene
     renderer.render(scene, camera);
@@ -1866,6 +2213,9 @@ function setupEventListeners() {
             if (textData.materialType === 'gradient') {
                 updateGradientPreview();
             }
+
+            // Dispatch event for crossfade visibility update
+            document.dispatchEvent(new CustomEvent('chatooly:material-type-changed'));
 
             rebuildParticleSystem();
         });
@@ -2433,73 +2783,71 @@ function setupEventListeners() {
         }
     });
 
-    // Material Crossfade toggle
+    // Gradient Crossfade toggle
     const crossfadeToggle = document.getElementById('hover-crossfade-toggle');
     const crossfadeControls = document.getElementById('hover-crossfade-controls');
+    const crossfadeSection = document.getElementById('hover-crossfade-section');
+
+    // Function to show/hide crossfade section based on material type
+    function updateCrossfadeVisibility() {
+        if (crossfadeSection) {
+            // Only show crossfade for gradient material type
+            crossfadeSection.style.display = textData.materialType === 'gradient' ? 'block' : 'none';
+        }
+    }
+
+    // Initial visibility update
+    updateCrossfadeVisibility();
+
+    // Listen for material type changes
+    document.addEventListener('chatooly:material-type-changed', updateCrossfadeVisibility);
+
     if (crossfadeToggle) {
         crossfadeToggle.addEventListener('toggle-change', (e) => {
             textData.hoverEffects.materialCrossfade.enabled = e.detail.checked;
             if (crossfadeControls) {
                 crossfadeControls.style.display = e.detail.checked ? 'block' : 'none';
             }
-        });
-    }
-
-    // Hover matcap upload
-    const hoverMatcapUpload = document.getElementById('hover-matcap-upload');
-    const hoverMatcapPreview = document.getElementById('hover-matcap-preview');
-    const hoverMatcapInfo = document.getElementById('hover-matcap-info');
-    const hoverMatcapName = document.getElementById('hover-matcap-name');
-    const hoverMatcapUploadArea = document.getElementById('hover-matcap-upload-area');
-    const clearHoverMatcap = document.getElementById('clear-hover-matcap');
-
-    if (hoverMatcapUpload) {
-        hoverMatcapUpload.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const THREE = window.THREE;
-                        const texture = new THREE.Texture(img);
-                        texture.needsUpdate = true;
-                        textData.hoverEffects.materialCrossfade.hoverMatcap = texture;
-                        if (hoverMatcapPreview) {
-                            hoverMatcapPreview.src = event.target.result;
-                            hoverMatcapPreview.style.display = 'block';
-                        }
-                        if (hoverMatcapInfo) hoverMatcapInfo.style.display = 'block';
-                        if (hoverMatcapName) hoverMatcapName.textContent = file.name;
-                        if (hoverMatcapUploadArea) hoverMatcapUploadArea.style.display = 'none';
-                    };
-                    img.src = event.target.result;
-                };
-                reader.readAsDataURL(file);
+            // Rebuild to initialize lerp materials
+            if (e.detail.checked && textData.materialType === 'gradient') {
+                rebuildParticleSystem();
+            } else {
+                cleanupLerpMeshes();
+                cleanupLerpMaterials();
+                render();
             }
         });
     }
 
-    // Clear hover matcap
-    if (clearHoverMatcap) {
-        clearHoverMatcap.addEventListener('click', () => {
-            textData.hoverEffects.materialCrossfade.hoverMatcap = null;
-            if (hoverMatcapInfo) hoverMatcapInfo.style.display = 'none';
-            if (hoverMatcapPreview) {
-                hoverMatcapPreview.src = '';
-                hoverMatcapPreview.style.display = 'none';
+    // Hover gradient color pickers
+    const hoverGradientStart = document.getElementById('hover-gradient-start');
+    const hoverGradientMid = document.getElementById('hover-gradient-mid');
+    const hoverGradientEnd = document.getElementById('hover-gradient-end');
+
+    function updateHoverGradient() {
+        if (hoverGradientStart && hoverGradientMid && hoverGradientEnd) {
+            textData.hoverEffects.materialCrossfade.hoverGradient.stops = [
+                { color: hoverGradientStart.value, position: 0 },
+                { color: hoverGradientMid.value, position: 50 },
+                { color: hoverGradientEnd.value, position: 100 }
+            ];
+            // Rebuild lerp materials if crossfade is enabled
+            if (textData.hoverEffects.materialCrossfade.enabled && textData.materialType === 'gradient') {
+                initLerpMaterials();
+                initLerpMeshes();
+                render();
             }
-            if (hoverMatcapUploadArea) hoverMatcapUploadArea.style.display = 'block';
-            if (hoverMatcapUpload) hoverMatcapUpload.value = '';
-        });
+        }
     }
 
-    // Fallback color picker
-    const fallbackColorInput = document.getElementById('hover-fallback-color');
-    if (fallbackColorInput) {
-        fallbackColorInput.addEventListener('input', (e) => {
-            textData.hoverEffects.materialCrossfade.fallbackColor = e.target.value;
-        });
+    if (hoverGradientStart) {
+        hoverGradientStart.addEventListener('input', updateHoverGradient);
+    }
+    if (hoverGradientMid) {
+        hoverGradientMid.addEventListener('input', updateHoverGradient);
+    }
+    if (hoverGradientEnd) {
+        hoverGradientEnd.addEventListener('input', updateHoverGradient);
     }
 
     // Crossfade duration

@@ -1275,110 +1275,101 @@
                                 <input type="range" class="chatooly-slider" id="hover-radius" min="50" max="500" value="150">
                             </div>
 
-                            <!-- MAGNIFICATION Effect -->
-                            <div style="margin-top: 12px; padding: 10px; background: var(--chatooly-color-bg-secondary); border-radius: 6px;">
-                                <div class="chatooly-toggle-group" style="margin-bottom: 8px;">
-                                    <button class="chatooly-toggle active" id="hover-magnification-toggle" role="switch" aria-pressed="true">
-                                        <span class="chatooly-toggle-slider"></span>
-                                    </button>
-                                    <span class="chatooly-toggle-label">Magnification</span>
+                            <!-- MAGNIFICATION -->
+                            <div class="chatooly-toggle-group">
+                                <button class="chatooly-toggle active" id="hover-magnification-toggle" role="switch" aria-pressed="true">
+                                    <span class="chatooly-toggle-slider"></span>
+                                </button>
+                                <span class="chatooly-toggle-label">Magnification</span>
+                            </div>
+                            <div id="hover-magnification-controls">
+                                <div class="chatooly-slider-group">
+                                    <div class="chatooly-slider-label">
+                                        <span>Intensity</span>
+                                        <span class="chatooly-slider-value" id="hover-intensity-value">2.0</span>
+                                    </div>
+                                    <input type="range" class="chatooly-slider" id="hover-intensity" min="0.5" max="3" step="0.1" value="2">
                                 </div>
-                                <div id="hover-magnification-controls">
+                            </div>
+
+                            <!-- ROTATION -->
+                            <div class="chatooly-toggle-group">
+                                <button class="chatooly-toggle" id="hover-rotation-toggle" role="switch" aria-pressed="false">
+                                    <span class="chatooly-toggle-slider"></span>
+                                </button>
+                                <span class="chatooly-toggle-label">Rotation</span>
+                            </div>
+                            <div id="hover-rotation-controls" style="display: none;">
+                                <div class="chatooly-preset-grid" style="grid-template-columns: 1fr 1fr;">
+                                    <button class="chatooly-btn active" id="hover-rot-continuous" data-mode="continuous">Continuous</button>
+                                    <button class="chatooly-btn" id="hover-rot-target" data-mode="target">Target</button>
+                                </div>
+                                <div id="hover-rot-continuous-controls">
                                     <div class="chatooly-slider-group">
                                         <div class="chatooly-slider-label">
-                                            <span>Intensity</span>
-                                            <span class="chatooly-slider-value" id="hover-intensity-value">2.0</span>
+                                            <span>Speed</span>
+                                            <span class="chatooly-slider-value" id="hover-rot-speed-value">2.0</span>
                                         </div>
-                                        <input type="range" class="chatooly-slider" id="hover-intensity" min="0.5" max="3" step="0.1" value="2">
+                                        <input type="range" class="chatooly-slider" id="hover-rot-speed" min="0.5" max="10" step="0.5" value="2">
+                                    </div>
+                                    <div class="chatooly-slider-label" style="margin-bottom: 4px;"><span>Axis</span></div>
+                                    <div style="display: flex; gap: 6px;">
+                                        <div class="chatooly-slider-group" style="flex: 1;">
+                                            <div class="chatooly-slider-label"><span>X</span><span class="chatooly-slider-value" id="hover-rot-axis-x-value">0</span></div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-axis-x" min="-1" max="1" step="0.1" value="0">
+                                        </div>
+                                        <div class="chatooly-slider-group" style="flex: 1;">
+                                            <div class="chatooly-slider-label"><span>Y</span><span class="chatooly-slider-value" id="hover-rot-axis-y-value">1</span></div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-axis-y" min="-1" max="1" step="0.1" value="1">
+                                        </div>
+                                        <div class="chatooly-slider-group" style="flex: 1;">
+                                            <div class="chatooly-slider-label"><span>Z</span><span class="chatooly-slider-value" id="hover-rot-axis-z-value">0</span></div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-axis-z" min="-1" max="1" step="0.1" value="0">
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-
-                            <!-- ROTATION Effect -->
-                            <div style="margin-top: 8px; padding: 10px; background: var(--chatooly-color-bg-secondary); border-radius: 6px;">
-                                <div class="chatooly-toggle-group" style="margin-bottom: 8px;">
-                                    <button class="chatooly-toggle" id="hover-rotation-toggle" role="switch" aria-pressed="false">
-                                        <span class="chatooly-toggle-slider"></span>
-                                    </button>
-                                    <span class="chatooly-toggle-label">Rotation</span>
-                                </div>
-                                <div id="hover-rotation-controls" style="display: none;">
-                                    <div class="chatooly-input-group">
-                                        <label class="chatooly-input-label">Mode</label>
-                                        <div class="chatooly-preset-grid" style="grid-template-columns: 1fr 1fr;">
-                                            <button class="chatooly-btn active" id="hover-rot-continuous" data-mode="continuous">Continuous</button>
-                                            <button class="chatooly-btn" id="hover-rot-target" data-mode="target">Target</button>
+                                <div id="hover-rot-target-controls" style="display: none;">
+                                    <div class="chatooly-slider-label" style="margin-bottom: 4px;"><span>Target Angle</span></div>
+                                    <div style="display: flex; gap: 6px;">
+                                        <div class="chatooly-slider-group" style="flex: 1;">
+                                            <div class="chatooly-slider-label"><span>X</span><span class="chatooly-slider-value" id="hover-rot-target-x-value">0</span></div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-target-x" min="-180" max="180" step="5" value="0">
                                         </div>
-                                    </div>
-
-                                    <div id="hover-rot-continuous-controls">
-                                        <div class="chatooly-slider-group">
-                                            <div class="chatooly-slider-label">
-                                                <span>Speed</span>
-                                                <span class="chatooly-slider-value" id="hover-rot-speed-value">2.0</span>
-                                            </div>
-                                            <input type="range" class="chatooly-slider" id="hover-rot-speed" min="0.5" max="10" step="0.5" value="2">
+                                        <div class="chatooly-slider-group" style="flex: 1;">
+                                            <div class="chatooly-slider-label"><span>Y</span><span class="chatooly-slider-value" id="hover-rot-target-y-value">180</span></div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-target-y" min="-180" max="180" step="5" value="180">
                                         </div>
-                                        <label class="chatooly-input-label" style="margin-top: 4px;">Axis</label>
-                                        <div style="display: flex; gap: 6px;">
-                                            <div class="chatooly-slider-group" style="flex: 1;">
-                                                <div class="chatooly-slider-label"><span>X</span><span class="chatooly-slider-value" id="hover-rot-axis-x-value">0</span></div>
-                                                <input type="range" class="chatooly-slider" id="hover-rot-axis-x" min="-1" max="1" step="0.1" value="0">
-                                            </div>
-                                            <div class="chatooly-slider-group" style="flex: 1;">
-                                                <div class="chatooly-slider-label"><span>Y</span><span class="chatooly-slider-value" id="hover-rot-axis-y-value">1</span></div>
-                                                <input type="range" class="chatooly-slider" id="hover-rot-axis-y" min="-1" max="1" step="0.1" value="1">
-                                            </div>
-                                            <div class="chatooly-slider-group" style="flex: 1;">
-                                                <div class="chatooly-slider-label"><span>Z</span><span class="chatooly-slider-value" id="hover-rot-axis-z-value">0</span></div>
-                                                <input type="range" class="chatooly-slider" id="hover-rot-axis-z" min="-1" max="1" step="0.1" value="0">
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div id="hover-rot-target-controls" style="display: none;">
-                                        <label class="chatooly-input-label">Target Angle (degrees)</label>
-                                        <div style="display: flex; gap: 6px;">
-                                            <div class="chatooly-slider-group" style="flex: 1;">
-                                                <div class="chatooly-slider-label"><span>X</span><span class="chatooly-slider-value" id="hover-rot-target-x-value">0</span></div>
-                                                <input type="range" class="chatooly-slider" id="hover-rot-target-x" min="-180" max="180" step="5" value="0">
-                                            </div>
-                                            <div class="chatooly-slider-group" style="flex: 1;">
-                                                <div class="chatooly-slider-label"><span>Y</span><span class="chatooly-slider-value" id="hover-rot-target-y-value">180</span></div>
-                                                <input type="range" class="chatooly-slider" id="hover-rot-target-y" min="-180" max="180" step="5" value="180">
-                                            </div>
-                                            <div class="chatooly-slider-group" style="flex: 1;">
-                                                <div class="chatooly-slider-label"><span>Z</span><span class="chatooly-slider-value" id="hover-rot-target-z-value">0</span></div>
-                                                <input type="range" class="chatooly-slider" id="hover-rot-target-z" min="-180" max="180" step="5" value="0">
-                                            </div>
+                                        <div class="chatooly-slider-group" style="flex: 1;">
+                                            <div class="chatooly-slider-label"><span>Z</span><span class="chatooly-slider-value" id="hover-rot-target-z-value">0</span></div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-target-z" min="-180" max="180" step="5" value="0">
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- MATERIAL CROSSFADE Effect -->
-                            <div style="margin-top: 8px; padding: 10px; background: var(--chatooly-color-bg-secondary); border-radius: 6px;">
-                                <div class="chatooly-toggle-group" style="margin-bottom: 8px;">
+                            <!-- GRADIENT CROSSFADE (only for gradient material) -->
+                            <div id="hover-crossfade-section">
+                                <div class="chatooly-toggle-group">
                                     <button class="chatooly-toggle" id="hover-crossfade-toggle" role="switch" aria-pressed="false">
                                         <span class="chatooly-toggle-slider"></span>
                                     </button>
-                                    <span class="chatooly-toggle-label">Material Crossfade</span>
+                                    <span class="chatooly-toggle-label">Gradient Crossfade</span>
                                 </div>
                                 <div id="hover-crossfade-controls" style="display: none;">
-                                    <div class="chatooly-upload-area" id="hover-matcap-upload-area" style="height: 60px; margin-bottom: 8px;">
-                                        <div class="chatooly-upload-text" style="font-size: 11px;">Upload Hover Matcap (optional)</div>
-                                        <input type="file" class="chatooly-upload-input" id="hover-matcap-upload" accept="image/*">
-                                    </div>
-                                    <div id="hover-matcap-info" style="display: none; margin-bottom: 8px;">
-                                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                                            <img id="hover-matcap-preview" src="" alt="Hover Matcap" style="width: 32px; height: 32px; border-radius: 4px; display: none;">
-                                            <span id="hover-matcap-name" style="font-size: 11px; flex: 1;"></span>
-                                            <button class="chatooly-btn" id="clear-hover-matcap" style="padding: 2px 6px; font-size: 10px;">X</button>
+                                    <div class="chatooly-slider-label" style="margin-bottom: 6px;"><span>Hover Gradient Colors</span></div>
+                                    <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                                        <div class="chatooly-color-group" style="flex: 1;">
+                                            <label class="chatooly-color-label">Start</label>
+                                            <input type="color" class="chatooly-color-input" id="hover-gradient-start" value="#ffffff">
                                         </div>
-                                    </div>
-                                    <div class="chatooly-color-group">
-                                        <label class="chatooly-color-label" style="font-size: 11px;">Fallback Color</label>
-                                        <input type="color" class="chatooly-color-input" id="hover-fallback-color" value="#ffffff">
+                                        <div class="chatooly-color-group" style="flex: 1;">
+                                            <label class="chatooly-color-label">Mid</label>
+                                            <input type="color" class="chatooly-color-input" id="hover-gradient-mid" value="#ffcc00">
+                                        </div>
+                                        <div class="chatooly-color-group" style="flex: 1;">
+                                            <label class="chatooly-color-label">End</label>
+                                            <input type="color" class="chatooly-color-input" id="hover-gradient-end" value="#ff6600">
+                                        </div>
                                     </div>
                                     <div class="chatooly-slider-group">
                                         <div class="chatooly-slider-label">
