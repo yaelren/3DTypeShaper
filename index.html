@@ -1437,6 +1437,35 @@
                         </div>
                     </div>
                 </div>
+                <!-- Presets Section -->
+                <div class="chatooly-section-card" data-section="presets">
+                    <h3 class="chatooly-section-header">Presets</h3>
+                    <div class="chatooly-section-content">
+                        <!-- Save Preset Button -->
+                        <button class="chatooly-btn" id="save-preset-btn" style="width: 100%;">
+                            Save Preset
+                        </button>
+
+                        <!-- Load Preset Dropdown -->
+                        <div class="chatooly-slider-group" style="margin-top: 12px;">
+                            <label class="chatooly-slider-label">Load Saved Preset</label>
+                            <select id="preset-select" class="chatooly-select" style="width: 100%;">
+                                <option value="">-- Select Preset --</option>
+                            </select>
+                        </div>
+
+                        <!-- Load from File -->
+                        <label class="chatooly-btn" id="preset-upload-label" style="width: 100%; margin-top: 8px; display: block; text-align: center; cursor: pointer;">
+                            Load from File
+                            <input type="file" id="preset-upload" accept=".json" style="display: none;">
+                        </label>
+
+                        <!-- Delete Preset Button -->
+                        <button class="chatooly-btn" id="delete-preset-btn" style="width: 100%; margin-top: 8px; display: none;">
+                            Delete Selected Preset
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- Footer with Export Button -->

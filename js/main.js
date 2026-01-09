@@ -3158,10 +3158,291 @@ window.renderHighResolution = function(targetCanvas, scale) {
     console.log(`High-res export completed at ${scale}x resolution`);
 };
 
+// ========== PRESET MANAGEMENT ==========
+const PRESET_STORAGE_KEY = '3d-type-shaper-presets';
+
+function getPresetData() {
+    // Clone settings object, excluding non-serializable/runtime items
+    const preset = JSON.parse(JSON.stringify(textData));
+    // Remove runtime-only properties
+    delete preset.mouseX;
+    delete preset.mouseY;
+    delete preset.previousCanvasSize;
+    delete preset.animationTime;
+    delete preset.autoTime;
+    delete preset.isAnimating;
+    return preset;
+}
+
+function savePreset(name) {
+    const preset = {
+        name: name,
+        timestamp: Date.now(),
+        tool: '3DTypeShaper',
+        version: '1.0',
+        settings: getPresetData()
+    };
+
+    // Save to localStorage
+    const presets = JSON.parse(localStorage.getItem(PRESET_STORAGE_KEY) || '{}');
+    presets[name] = preset;
+    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(presets));
+
+    // Also download as JSON file
+    const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name.replace(/[^a-z0-9]/gi, '_')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    updatePresetDropdown();
+}
+
+function loadPreset(preset) {
+    // Apply settings from preset
+    Object.assign(textData, preset.settings);
+
+    // Sync all UI controls to match loaded values
+    syncUIToSettings();
+
+    // Re-render canvas
+    rebuildParticleSystem();
+}
+
+function loadPresetFromStorage(name) {
+    const presets = JSON.parse(localStorage.getItem(PRESET_STORAGE_KEY) || '{}');
+    if (presets[name]) {
+        loadPreset(presets[name]);
+    }
+}
+
+function deletePreset(name) {
+    const presets = JSON.parse(localStorage.getItem(PRESET_STORAGE_KEY) || '{}');
+    delete presets[name];
+    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(presets));
+    updatePresetDropdown();
+}
+
+function updatePresetDropdown() {
+    const select = document.getElementById('preset-select');
+    if (!select) return;
+
+    const presets = JSON.parse(localStorage.getItem(PRESET_STORAGE_KEY) || '{}');
+
+    select.innerHTML = '<option value="">-- Select Preset --</option>';
+    Object.keys(presets).sort().forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+    });
+}
+
+function syncUIToSettings() {
+    // Helper to set value and dispatch input event
+    const setSlider = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.value = value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    };
+
+    const setSelect = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.value = value;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    };
+
+    const setToggle = (id, enabled) => {
+        const el = document.getElementById(id);
+        if (el) {
+            const isPressed = el.getAttribute('aria-pressed') === 'true';
+            if (isPressed !== enabled) {
+                el.click();
+            }
+        }
+    };
+
+    const setColor = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.value = value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    };
+
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.value = value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    };
+
+    // Source mode
+    setSelect('source-mode', textData.sourceMode);
+    setSelect('spawn-shape-type', textData.spawnShapeType);
+    setSlider('spawn-shape-size', textData.spawnShapeSize);
+    setSlider('shape-offset-x', textData.shapeOffsetX);
+    setSlider('shape-offset-y', textData.shapeOffsetY);
+
+    // Text settings
+    setText('text-input', textData.text);
+    setSelect('font-selector', textData.fontFamily);
+    setSlider('font-size', textData.fontSize);
+    setSlider('leading', textData.leading);
+    setSlider('letter-spacing', textData.letterSpacing);
+    setSlider('text-offset-x', textData.textOffsetX);
+    setSlider('text-offset-y', textData.textOffsetY);
+
+    // Shape settings
+    setSelect('shape-type', textData.shapeType);
+    setSlider('shape-size', textData.shapeSize);
+    setSlider('spacing', textData.spacing);
+
+    // Material settings
+    setSelect('material-type', textData.materialType);
+    setColor('shape-color', textData.shapeColor);
+    setSelect('shader-mode', textData.shaderMode);
+    setSelect('gradient-type', textData.gradientSets[0]?.type || 'radial');
+
+    // Lighting
+    setSlider('light-position', textData.lightPosition);
+    setSlider('light-intensity', textData.lightIntensity);
+    setColor('light-color', textData.lightColor);
+    setToggle('rim-enabled', textData.rimEnabled);
+    setColor('rim-color', textData.rimColor);
+    setSlider('rim-intensity', textData.rimIntensity);
+
+    // Facing mode
+    setSelect('facing-mode', textData.facingMode);
+    setSlider('angle-x', textData.fixedAngleX);
+    setSlider('angle-y', textData.fixedAngleY);
+    setSlider('angle-z', textData.fixedAngleZ);
+
+    // Animation
+    setSelect('animation-type', textData.animationType);
+    setSlider('rotate-speed', textData.rotateSpeed);
+    setSlider('rotation-axis-x', textData.rotationAxis?.x || 0);
+    setSlider('rotation-axis-y', textData.rotationAxis?.y || 1);
+    setSlider('rotation-axis-z', textData.rotationAxis?.z || 0);
+    setSlider('tumble-amount', textData.tumbleAmount);
+    setSlider('tumble-speed', textData.tumbleSpeed);
+
+    // Interaction mode
+    setSelect('auto-pattern', textData.autoPattern);
+    setSlider('auto-speed', textData.autoSpeed);
+    setSlider('auto-size', textData.autoSize);
+    setToggle('auto-debug', textData.autoDebug);
+
+    // Hover effects
+    setToggle('hover-effect', textData.hoverEffects?.enabled || false);
+    setSlider('hover-radius', textData.hoverEffects?.radius || 150);
+    setToggle('hover-magnification', textData.hoverEffects?.magnification?.enabled || false);
+    setSlider('hover-intensity', (textData.hoverEffects?.magnification?.intensity || 2) * 100);
+    setToggle('hover-rotation', textData.hoverEffects?.rotation?.enabled || false);
+    setSlider('hover-rot-speed', textData.hoverEffects?.rotation?.speed || 2);
+    setToggle('hover-crossfade', textData.hoverEffects?.materialCrossfade?.enabled || false);
+
+    // Update gradient stops UI (this is complex - gradients will need manual refresh)
+    if (textData.gradientSets && textData.gradientSets[0]) {
+        // Trigger gradient rebuild
+        const event = new CustomEvent('preset-gradient-loaded', {
+            detail: textData.gradientSets[0]
+        });
+        document.dispatchEvent(event);
+    }
+
+    // Update slider value displays
+    document.querySelectorAll('.chatooly-slider').forEach(slider => {
+        const valueSpan = document.querySelector(`#${slider.id}-value`);
+        if (valueSpan) {
+            valueSpan.textContent = slider.value;
+        }
+    });
+}
+
+function initPresetUI() {
+    // Save preset button
+    const saveBtn = document.getElementById('save-preset-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            const name = prompt('Enter preset name:');
+            if (!name || !name.trim()) {
+                return;
+            }
+            savePreset(name.trim());
+        });
+    }
+
+    // Preset select dropdown
+    const presetSelect = document.getElementById('preset-select');
+    if (presetSelect) {
+        presetSelect.addEventListener('change', (e) => {
+            const deleteBtn = document.getElementById('delete-preset-btn');
+            if (e.target.value) {
+                loadPresetFromStorage(e.target.value);
+                if (deleteBtn) deleteBtn.style.display = 'block';
+            } else {
+                if (deleteBtn) deleteBtn.style.display = 'none';
+            }
+        });
+    }
+
+    // Upload preset from file
+    const presetUpload = document.getElementById('preset-upload');
+    if (presetUpload) {
+        presetUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const preset = JSON.parse(event.target.result);
+                        if (preset.settings) {
+                            loadPreset(preset);
+                        } else {
+                            alert('Invalid preset file format');
+                        }
+                    } catch (err) {
+                        alert('Invalid preset file: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = ''; // Reset input
+            }
+        });
+    }
+
+    // Delete preset button
+    const deleteBtn = document.getElementById('delete-preset-btn');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+            const select = document.getElementById('preset-select');
+            const name = select?.value;
+            if (name && confirm(`Delete preset "${name}"?`)) {
+                deletePreset(name);
+                deleteBtn.style.display = 'none';
+            }
+        });
+    }
+
+    // Initialize dropdown with saved presets
+    updatePresetDropdown();
+}
+
 // ========== INITIALIZATION ==========
 document.addEventListener('DOMContentLoaded', () => {
     // If Three.js is already loaded, initialize
     if (threeReady) {
         init();
     }
+
+    // Initialize preset UI
+    initPresetUI();
 });
