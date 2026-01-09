@@ -19,10 +19,11 @@ class MatCapGenerator {
      * Generate matcap texture from gradient stops
      * @param {Array} stops - [{color: '#hex', position: 0-100}, ...]
      * @param {string} type - 'radial' or 'linear'
-     * @param {number} lightPosition - 0-1, light angle offset
+     * @param {number} lightPosition - 0-1, light angle offset (ignored in flat mode)
+     * @param {boolean} centered - If true, use perfectly centered gradient (for flat/unlit mode)
      * @returns {THREE.CanvasTexture}
      */
-    generate(stops, type = 'radial', lightPosition = 0.5) {
+    generate(stops, type = 'radial', lightPosition = 0.5, centered = false) {
         const { ctx, size } = this;
         const center = size / 2;
         const radius = size / 2;
@@ -34,15 +35,24 @@ class MatCapGenerator {
         const sortedStops = [...stops].sort((a, b) => a.position - b.position);
 
         if (type === 'radial') {
-            // Radial gradient from light source (offset from center) outward
-            // Light position controls horizontal offset of the highlight
-            const lightOffsetX = (lightPosition - 0.5) * radius * 0.8;
-            const lightOffsetY = -radius * 0.3; // Light slightly from above
+            let gradient;
+            if (centered) {
+                // Centered gradient - pure circular from center (matches Cinema 4D Ramp shader)
+                gradient = ctx.createRadialGradient(
+                    center, center, 0,
+                    center, center, radius
+                );
+            } else {
+                // Radial gradient from light source (offset from center) outward
+                // Light position controls horizontal offset of the highlight
+                const lightOffsetX = (lightPosition - 0.5) * radius * 0.8;
+                const lightOffsetY = -radius * 0.3; // Light slightly from above
 
-            const gradient = ctx.createRadialGradient(
-                center + lightOffsetX, center + lightOffsetY, 0,
-                center, center, radius
-            );
+                gradient = ctx.createRadialGradient(
+                    center + lightOffsetX, center + lightOffsetY, 0,
+                    center, center, radius
+                );
+            }
 
             sortedStops.forEach(stop => {
                 gradient.addColorStop(stop.position / 100, stop.color);
@@ -51,7 +61,7 @@ class MatCapGenerator {
             ctx.fillStyle = gradient;
         } else {
             // Linear gradient with angle controlled by light position
-            const angle = lightPosition * Math.PI;
+            const angle = centered ? Math.PI / 2 : lightPosition * Math.PI;
             const x1 = center + Math.cos(angle) * radius;
             const y1 = center + Math.sin(angle) * radius;
             const x2 = center - Math.cos(angle) * radius;

@@ -996,7 +996,8 @@
                             <div class="chatooly-input-group">
                                 <label class="chatooly-input-label">Shader Mode</label>
                                 <select class="chatooly-select" id="shader-mode">
-                                    <option value="reflective" selected>Reflective</option>
+                                    <option value="flat" selected>Flat (No Lighting)</option>
+                                    <option value="reflective">Reflective</option>
                                     <option value="toon">Toon</option>
                                 </select>
                             </div>
@@ -1036,48 +1037,50 @@
                                 <canvas id="gradient-preview" width="80" height="80" style="border-radius: 50%; border: 2px solid var(--chatooly-color-border);"></canvas>
                             </div>
 
-                            <!-- Light Controls -->
-                            <div class="chatooly-slider-group">
-                                <div class="chatooly-slider-label">
-                                    <span>Light Position</span>
-                                    <span class="chatooly-slider-value" id="light-position-value">0.5</span>
-                                </div>
-                                <input type="range" class="chatooly-slider" id="light-position" min="0" max="1" step="0.05" value="0.5">
-                            </div>
-
-                            <div class="chatooly-slider-group">
-                                <div class="chatooly-slider-label">
-                                    <span>Light Intensity</span>
-                                    <span class="chatooly-slider-value" id="light-intensity-value">1.0</span>
-                                </div>
-                                <input type="range" class="chatooly-slider" id="light-intensity" min="0" max="2" step="0.1" value="1">
-                            </div>
-
-                            <div class="chatooly-color-group">
-                                <label class="chatooly-color-label">Light Color</label>
-                                <input type="color" class="chatooly-color-input" id="light-color" value="#ffffff">
-                            </div>
-
-                            <!-- Rim Light Controls -->
-                            <div class="chatooly-toggle-group">
-                                <button class="chatooly-toggle" id="rim-enabled" role="switch" aria-pressed="true" aria-labelledby="toggle-rim">
-                                    <span class="chatooly-toggle-slider"></span>
-                                </button>
-                                <span class="chatooly-toggle-label" id="toggle-rim">Rim Light</span>
-                            </div>
-
-                            <div id="rim-controls-group">
-                                <div class="chatooly-color-group">
-                                    <label class="chatooly-color-label">Rim Color</label>
-                                    <input type="color" class="chatooly-color-input" id="rim-color" value="#ffffff">
+                            <!-- Light Controls (hidden in flat mode) -->
+                            <div id="lighting-controls-section" style="display: none;">
+                                <div class="chatooly-slider-group">
+                                    <div class="chatooly-slider-label">
+                                        <span>Light Position</span>
+                                        <span class="chatooly-slider-value" id="light-position-value">0.5</span>
+                                    </div>
+                                    <input type="range" class="chatooly-slider" id="light-position" min="0" max="1" step="0.05" value="0.5">
                                 </div>
 
                                 <div class="chatooly-slider-group">
                                     <div class="chatooly-slider-label">
-                                        <span>Rim Intensity</span>
-                                        <span class="chatooly-slider-value" id="rim-intensity-value">0.5</span>
+                                        <span>Light Intensity</span>
+                                        <span class="chatooly-slider-value" id="light-intensity-value">1.0</span>
                                     </div>
-                                    <input type="range" class="chatooly-slider" id="rim-intensity" min="0" max="2" step="0.1" value="0.5">
+                                    <input type="range" class="chatooly-slider" id="light-intensity" min="0" max="2" step="0.1" value="1">
+                                </div>
+
+                                <div class="chatooly-color-group">
+                                    <label class="chatooly-color-label">Light Color</label>
+                                    <input type="color" class="chatooly-color-input" id="light-color" value="#ffffff">
+                                </div>
+
+                                <!-- Rim Light Controls -->
+                                <div class="chatooly-toggle-group">
+                                    <button class="chatooly-toggle" id="rim-enabled" role="switch" aria-pressed="true" aria-labelledby="toggle-rim">
+                                        <span class="chatooly-toggle-slider"></span>
+                                    </button>
+                                    <span class="chatooly-toggle-label" id="toggle-rim">Rim Light</span>
+                                </div>
+
+                                <div id="rim-controls-group">
+                                    <div class="chatooly-color-group">
+                                        <label class="chatooly-color-label">Rim Color</label>
+                                        <input type="color" class="chatooly-color-input" id="rim-color" value="#ffffff">
+                                    </div>
+
+                                    <div class="chatooly-slider-group">
+                                        <div class="chatooly-slider-label">
+                                            <span>Rim Intensity</span>
+                                            <span class="chatooly-slider-value" id="rim-intensity-value">0.5</span>
+                                        </div>
+                                        <input type="range" class="chatooly-slider" id="rim-intensity" min="0" max="2" step="0.1" value="0.5">
+                                    </div>
                                 </div>
                             </div>
                         </div>

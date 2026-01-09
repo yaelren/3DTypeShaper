@@ -73,7 +73,7 @@ let textData = {
     rimEnabled: true,
     rimColor: '#ffffff',
     rimIntensity: 0.5,
-    shaderMode: 'reflective',  // 'reflective' or 'toon'
+    shaderMode: 'flat',  // 'flat' (no lighting), 'reflective', or 'toon'
 
     // Facing behavior (for GLB models)
     facingMode: 'billboard',  // 'billboard', 'random', 'fixed'
@@ -629,12 +629,14 @@ function createGradientMaterial() {
     }
 
     const currentGradient = textData.gradientSets[textData.activeGradientIndex] || textData.gradientSets[0];
+    const isFlat = textData.shaderMode === 'flat';
 
-    // Generate matcap texture from gradient
+    // Generate matcap texture from gradient (centered in flat mode)
     const texture = matcapGenerator.generate(
         currentGradient.stops,
         currentGradient.type,
-        textData.lightPosition
+        textData.lightPosition,
+        isFlat
     );
 
     const material = new THREE.MeshMatcapMaterial({
@@ -643,13 +645,14 @@ function createGradientMaterial() {
         flatShading: textData.shaderMode === 'toon'
     });
 
-    // Extend with rim light via onBeforeCompile
+    // Extend with rim light via onBeforeCompile (skipped in flat mode)
     material.onBeforeCompile = (shader) => {
         shader.uniforms.rimColor = { value: new THREE.Color(textData.rimColor) };
-        shader.uniforms.rimIntensity = { value: textData.rimEnabled ? textData.rimIntensity : 0 };
+        shader.uniforms.rimIntensity = { value: isFlat ? 0 : (textData.rimEnabled ? textData.rimIntensity : 0) };
         shader.uniforms.lightColor = { value: new THREE.Color(textData.lightColor) };
-        shader.uniforms.lightIntensity = { value: textData.lightIntensity };
+        shader.uniforms.lightIntensity = { value: isFlat ? 1.0 : textData.lightIntensity };
         shader.uniforms.toonMode = { value: textData.shaderMode === 'toon' ? 1 : 0 };
+        shader.uniforms.flatMode = { value: isFlat ? 1 : 0 };
 
         // Inject uniforms after #include <common>
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -659,25 +662,29 @@ function createGradientMaterial() {
             uniform float rimIntensity;
             uniform vec3 lightColor;
             uniform float lightIntensity;
-            uniform int toonMode;`
+            uniform int toonMode;
+            uniform int flatMode;`
         );
 
-        // Add rim light + toon effect before opaque_fragment
+        // Add lighting effects before opaque_fragment (skipped in flat mode)
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <opaque_fragment>',
-            `// Apply light color and intensity
-            outgoingLight *= lightColor * lightIntensity;
+            `// Flat mode: pure matcap colors without lighting modification
+            if (flatMode == 0) {
+                // Apply light color and intensity
+                outgoingLight *= lightColor * lightIntensity;
 
-            // Toon posterization
-            if (toonMode == 1) {
-                outgoingLight = floor(outgoingLight * 4.0) / 4.0;
+                // Toon posterization
+                if (toonMode == 1) {
+                    outgoingLight = floor(outgoingLight * 4.0) / 4.0;
+                }
+
+                // Rim light (Fresnel effect)
+                vec3 rimViewDir = normalize(vViewPosition);
+                float rimFactor = 1.0 - max(0.0, dot(normal, rimViewDir));
+                rimFactor = pow(rimFactor, 2.0);
+                outgoingLight += rimColor * rimFactor * rimIntensity;
             }
-
-            // Rim light (Fresnel effect)
-            vec3 rimViewDir = normalize(vViewPosition);
-            float rimFactor = 1.0 - max(0.0, dot(normal, rimViewDir));
-            rimFactor = pow(rimFactor, 2.0);
-            outgoingLight += rimColor * rimFactor * rimIntensity;
 
             #include <opaque_fragment>`
         );
@@ -696,12 +703,14 @@ function updateGradientMaterial() {
 
     const THREE = window.THREE;
     const currentGradient = textData.gradientSets[textData.activeGradientIndex] || textData.gradientSets[0];
+    const isFlat = textData.shaderMode === 'flat';
 
-    // Regenerate matcap texture
+    // Regenerate matcap texture (centered in flat mode)
     const texture = matcapGenerator.generate(
         currentGradient.stops,
         currentGradient.type,
-        textData.lightPosition
+        textData.lightPosition,
+        isFlat
     );
 
     // Update material
@@ -716,10 +725,11 @@ function updateGradientMaterial() {
     if (gradientMaterial.userData.shader) {
         const uniforms = gradientMaterial.userData.shader.uniforms;
         uniforms.rimColor.value.set(textData.rimColor);
-        uniforms.rimIntensity.value = textData.rimEnabled ? textData.rimIntensity : 0;
+        uniforms.rimIntensity.value = isFlat ? 0 : (textData.rimEnabled ? textData.rimIntensity : 0);
         uniforms.lightColor.value.set(textData.lightColor);
-        uniforms.lightIntensity.value = textData.lightIntensity;
+        uniforms.lightIntensity.value = isFlat ? 1.0 : textData.lightIntensity;
         uniforms.toonMode.value = textData.shaderMode === 'toon' ? 1 : 0;
+        uniforms.flatMode.value = isFlat ? 1 : 0;
     }
 
     render();
@@ -782,6 +792,7 @@ function initLerpMaterials() {
     }
 
     const THREE = window.THREE;
+    const isFlat = textData.shaderMode === 'flat';
 
     // Clean up existing lerp materials
     cleanupLerpMaterials();
@@ -795,11 +806,12 @@ function initLerpMaterials() {
         const ratio = i / LERP_STEPS;
         const interpolatedStops = interpolateGradientStops(baseGradient.stops, hoverGradient.stops, ratio);
 
-        // Generate matcap texture for this interpolation step
+        // Generate matcap texture for this interpolation step (centered in flat mode)
         const texture = matcapGenerator.generate(
             interpolatedStops,
             baseGradient.type,  // Use base gradient type
-            textData.lightPosition
+            textData.lightPosition,
+            isFlat
         );
 
         // Create material with same shader modifications as main gradient
@@ -809,13 +821,14 @@ function initLerpMaterials() {
             flatShading: textData.shaderMode === 'toon'
         });
 
-        // Add rim light shader modifications (same as createGradientMaterial)
+        // Add rim light shader modifications (skipped in flat mode)
         material.onBeforeCompile = (shader) => {
             shader.uniforms.rimColor = { value: new THREE.Color(textData.rimColor) };
-            shader.uniforms.rimIntensity = { value: textData.rimEnabled ? textData.rimIntensity : 0 };
+            shader.uniforms.rimIntensity = { value: isFlat ? 0 : (textData.rimEnabled ? textData.rimIntensity : 0) };
             shader.uniforms.lightColor = { value: new THREE.Color(textData.lightColor) };
-            shader.uniforms.lightIntensity = { value: textData.lightIntensity };
+            shader.uniforms.lightIntensity = { value: isFlat ? 1.0 : textData.lightIntensity };
             shader.uniforms.toonMode = { value: textData.shaderMode === 'toon' ? 1 : 0 };
+            shader.uniforms.flatMode = { value: isFlat ? 1 : 0 };
 
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <common>',
@@ -824,19 +837,23 @@ function initLerpMaterials() {
                 uniform float rimIntensity;
                 uniform vec3 lightColor;
                 uniform float lightIntensity;
-                uniform int toonMode;`
+                uniform int toonMode;
+                uniform int flatMode;`
             );
 
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <opaque_fragment>',
-                `outgoingLight *= lightColor * lightIntensity;
-                if (toonMode == 1) {
-                    outgoingLight = floor(outgoingLight * 4.0) / 4.0;
+                `// Flat mode: pure matcap colors without lighting modification
+                if (flatMode == 0) {
+                    outgoingLight *= lightColor * lightIntensity;
+                    if (toonMode == 1) {
+                        outgoingLight = floor(outgoingLight * 4.0) / 4.0;
+                    }
+                    vec3 rimViewDir = normalize(vViewPosition);
+                    float rimFactor = 1.0 - max(0.0, dot(normal, rimViewDir));
+                    rimFactor = pow(rimFactor, 2.0);
+                    outgoingLight += rimColor * rimFactor * rimIntensity;
                 }
-                vec3 rimViewDir = normalize(vViewPosition);
-                float rimFactor = 1.0 - max(0.0, dot(normal, rimViewDir));
-                rimFactor = pow(rimFactor, 2.0);
-                outgoingLight += rimColor * rimFactor * rimIntensity;
                 #include <opaque_fragment>`
             );
 
@@ -2251,9 +2268,14 @@ function setupEventListeners() {
 
     // Shader mode
     const shaderModeSelect = document.getElementById('shader-mode');
+    const lightingControlsSection = document.getElementById('lighting-controls-section');
     if (shaderModeSelect) {
         shaderModeSelect.addEventListener('change', (e) => {
             textData.shaderMode = e.target.value;
+            // Show/hide lighting controls based on shader mode
+            if (lightingControlsSection) {
+                lightingControlsSection.style.display = e.target.value === 'flat' ? 'none' : 'block';
+            }
             if (textData.materialType === 'gradient') {
                 rebuildParticleSystem();
             }
