@@ -1291,9 +1291,10 @@
                                     <span class="chatooly-toggle-label">Rotation</span>
                                 </div>
                                 <div id="hover-rotation-controls" style="display: none;">
-                                    <div class="chatooly-preset-grid" style="grid-template-columns: 1fr 1fr;">
+                                    <div class="chatooly-preset-grid" style="grid-template-columns: 1fr 1fr 1fr;">
                                         <button class="chatooly-btn active" id="hover-rot-continuous" data-mode="continuous">Continuous</button>
                                         <button class="chatooly-btn" id="hover-rot-target" data-mode="target">Target</button>
+                                        <button class="chatooly-btn" id="hover-rot-lookat" data-mode="lookAt">Look At</button>
                                     </div>
                                     <div id="hover-rot-continuous-controls">
                                         <div class="chatooly-slider-group">
@@ -1334,6 +1335,22 @@
                                                 <div class="chatooly-slider-label"><span>Z</span><span class="chatooly-slider-value" id="hover-rot-target-z-value">0</span></div>
                                                 <input type="range" class="chatooly-slider" id="hover-rot-target-z" min="-180" max="180" step="5" value="0">
                                             </div>
+                                        </div>
+                                    </div>
+                                    <div id="hover-rot-lookat-controls" style="display: none;">
+                                        <div class="chatooly-slider-group">
+                                            <div class="chatooly-slider-label">
+                                                <span>Intensity</span>
+                                                <span class="chatooly-slider-value" id="hover-rot-lookat-intensity-value">100%</span>
+                                            </div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-lookat-intensity" min="10" max="100" step="5" value="100">
+                                        </div>
+                                        <div class="chatooly-slider-group">
+                                            <div class="chatooly-slider-label">
+                                                <span>Smoothing</span>
+                                                <span class="chatooly-slider-value" id="hover-rot-lookat-smoothing-value">0.10</span>
+                                            </div>
+                                            <input type="range" class="chatooly-slider" id="hover-rot-lookat-smoothing" min="0.01" max="0.5" step="0.01" value="0.1">
                                         </div>
                                     </div>
                                 </div>

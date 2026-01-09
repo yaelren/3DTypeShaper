@@ -105,10 +105,13 @@ let textData = {
         // Rotation effect
         rotation: {
             enabled: false,
-            mode: 'continuous',   // 'continuous' | 'target'
+            mode: 'continuous',   // 'continuous' | 'target' | 'lookAt'
             speed: 2.0,           // For continuous mode
             targetAngle: { x: 0, y: 180, z: 0 },  // For target mode (degrees)
             axis: { x: 0, y: 1, z: 0 },
+            // LookAt mode properties
+            lookAtIntensity: 1.0,   // Max rotation intensity (0-1)
+            lookAtSmoothing: 0.1,   // Interpolation factor for smooth transitions
         },
         // Material crossfade effect (gradient mode only)
         materialCrossfade: {
@@ -1308,6 +1311,12 @@ function updateInstancedMesh(rotationAngle = 0, deltaTime = 0) {
                     finalRotX += rotEffect.targetAngle.x * DEG2RAD * hoverProgress;
                     finalRotY += rotEffect.targetAngle.y * DEG2RAD * hoverProgress;
                     finalRotZ += rotEffect.targetAngle.z * DEG2RAD * hoverProgress;
+                } else if (rotEffect.mode === 'lookAt') {
+                    // Look at mouse with intensity based on hover progress (distance)
+                    const lookAtRot = calculateHoverLookAt(p, hoverProgress, rot, rotEffect);
+                    finalRotX += lookAtRot.x;
+                    finalRotY += lookAtRot.y;
+                    finalRotZ += lookAtRot.z;
                 }
             }
         }
@@ -1451,6 +1460,73 @@ function updateLookAtMouse(index, rot, delta) {
     rot.x += (clampedRotX - rot.x) * lagFactor;
     rot.y += (clampedRotY - rot.y) * lagFactor;
     rot.z += (clampedRotZ - rot.z) * lagFactor;
+}
+
+// Calculate look-at rotation for hover effect (distance-based intensity)
+function calculateHoverLookAt(particlePos, hoverProgress, rot, rotEffect) {
+    if (!mouseWorldPos || textData.mouseX === null || textData.mouseY === null) {
+        return { x: 0, y: 0, z: 0 };
+    }
+
+    const THREE = window.THREE;
+    const canvas = document.getElementById('chatooly-canvas');
+
+    // Convert mouse screen position to world coordinates
+    const mouseNDC = new THREE.Vector3(
+        (textData.mouseX / canvas.width) * 2 - 1,
+        -(textData.mouseY / canvas.height) * 2 + 1,
+        0
+    );
+    mouseNDC.unproject(camera);
+    mouseWorldPos.set(mouseNDC.x, mouseNDC.y, 0);
+
+    // Calculate direction from particle to mouse
+    const toMouse = new THREE.Vector3(
+        mouseWorldPos.x - particlePos.x,
+        mouseWorldPos.y - particlePos.y,
+        0
+    );
+
+    const distance = toMouse.length();
+    if (distance < 0.01) {
+        return { x: 0, y: 0, z: 0 };
+    }
+
+    toMouse.normalize();
+
+    // Calculate target rotations (pitch/yaw like lookAtMouse animation)
+    const targetRotY = Math.atan2(toMouse.x, 0.5) * 1.2;
+    const targetRotX = Math.atan2(-toMouse.y, 1) * 0.8;
+    const targetRotZ = toMouse.x * 0.2;
+
+    // Clamp to prevent extreme angles
+    const maxAngleY = Math.PI / 2.5;
+    const maxAngleX = Math.PI / 4;
+    const maxRoll = Math.PI / 10;
+
+    const clampedRotX = Math.max(-maxAngleX, Math.min(maxAngleX, targetRotX));
+    const clampedRotY = Math.max(-maxAngleY, Math.min(maxAngleY, targetRotY));
+    const clampedRotZ = Math.max(-maxRoll, Math.min(maxRoll, targetRotZ));
+
+    // Scale by hover progress (distance-based) and intensity
+    const intensity = rotEffect.lookAtIntensity * hoverProgress;
+
+    // Initialize hover lookAt state if needed
+    if (rot.hoverLookAtX === undefined) rot.hoverLookAtX = 0;
+    if (rot.hoverLookAtY === undefined) rot.hoverLookAtY = 0;
+    if (rot.hoverLookAtZ === undefined) rot.hoverLookAtZ = 0;
+
+    // Smoothly interpolate toward target rotation
+    const smoothing = rotEffect.lookAtSmoothing;
+    rot.hoverLookAtX += (clampedRotX * intensity - rot.hoverLookAtX) * smoothing;
+    rot.hoverLookAtY += (clampedRotY * intensity - rot.hoverLookAtY) * smoothing;
+    rot.hoverLookAtZ += (clampedRotZ * intensity - rot.hoverLookAtZ) * smoothing;
+
+    return {
+        x: rot.hoverLookAtX,
+        y: rot.hoverLookAtY,
+        z: rot.hoverLookAtZ
+    };
 }
 
 // ========== HOVER EFFECT ==========
@@ -2662,27 +2738,66 @@ function setupEventListeners() {
         });
     }
 
-    // Rotation mode buttons (continuous vs target)
+    // Rotation mode buttons (continuous vs target vs lookAt)
     const rotContinuousBtn = document.getElementById('hover-rot-continuous');
     const rotTargetBtn = document.getElementById('hover-rot-target');
+    const rotLookAtBtn = document.getElementById('hover-rot-lookat');
     const rotContinuousControls = document.getElementById('hover-rot-continuous-controls');
     const rotTargetControls = document.getElementById('hover-rot-target-controls');
+    const rotLookAtControls = document.getElementById('hover-rot-lookat-controls');
 
     if (rotContinuousBtn && rotTargetBtn) {
         rotContinuousBtn.addEventListener('click', () => {
             textData.hoverEffects.rotation.mode = 'continuous';
             rotContinuousBtn.classList.add('active');
             rotTargetBtn.classList.remove('active');
+            if (rotLookAtBtn) rotLookAtBtn.classList.remove('active');
             if (rotContinuousControls) rotContinuousControls.style.display = 'block';
             if (rotTargetControls) rotTargetControls.style.display = 'none';
+            if (rotLookAtControls) rotLookAtControls.style.display = 'none';
         });
 
         rotTargetBtn.addEventListener('click', () => {
             textData.hoverEffects.rotation.mode = 'target';
             rotTargetBtn.classList.add('active');
             rotContinuousBtn.classList.remove('active');
+            if (rotLookAtBtn) rotLookAtBtn.classList.remove('active');
             if (rotTargetControls) rotTargetControls.style.display = 'block';
             if (rotContinuousControls) rotContinuousControls.style.display = 'none';
+            if (rotLookAtControls) rotLookAtControls.style.display = 'none';
+        });
+    }
+
+    if (rotLookAtBtn) {
+        rotLookAtBtn.addEventListener('click', () => {
+            textData.hoverEffects.rotation.mode = 'lookAt';
+            rotLookAtBtn.classList.add('active');
+            if (rotContinuousBtn) rotContinuousBtn.classList.remove('active');
+            if (rotTargetBtn) rotTargetBtn.classList.remove('active');
+            if (rotLookAtControls) rotLookAtControls.style.display = 'block';
+            if (rotContinuousControls) rotContinuousControls.style.display = 'none';
+            if (rotTargetControls) rotTargetControls.style.display = 'none';
+        });
+    }
+
+    // LookAt intensity slider
+    const lookAtIntensityInput = document.getElementById('hover-rot-lookat-intensity');
+    const lookAtIntensityValue = document.getElementById('hover-rot-lookat-intensity-value');
+    if (lookAtIntensityInput) {
+        lookAtIntensityInput.addEventListener('input', (e) => {
+            const percentage = parseInt(e.target.value);
+            textData.hoverEffects.rotation.lookAtIntensity = percentage / 100;
+            if (lookAtIntensityValue) lookAtIntensityValue.textContent = percentage + '%';
+        });
+    }
+
+    // LookAt smoothing slider
+    const lookAtSmoothingInput = document.getElementById('hover-rot-lookat-smoothing');
+    const lookAtSmoothingValue = document.getElementById('hover-rot-lookat-smoothing-value');
+    if (lookAtSmoothingInput) {
+        lookAtSmoothingInput.addEventListener('input', (e) => {
+            textData.hoverEffects.rotation.lookAtSmoothing = parseFloat(e.target.value);
+            if (lookAtSmoothingValue) lookAtSmoothingValue.textContent = parseFloat(e.target.value).toFixed(2);
         });
     }
 
