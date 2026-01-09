@@ -311,14 +311,17 @@ function initBackgroundManager() {
 
     if (transparentToggle) {
         transparentToggle.addEventListener('click', () => {
-            const isPressed = transparentToggle.getAttribute('aria-pressed') === 'true';
-            if (window.Chatooly && window.Chatooly.backgroundManager) {
-                Chatooly.backgroundManager.setTransparent(isPressed);
-            }
-            if (bgColorGroup) {
-                bgColorGroup.style.display = isPressed ? 'none' : 'block';
-            }
-            updateBackground();
+            // Defer to next tick to ensure aria-pressed is updated by toggle script first
+            setTimeout(() => {
+                const isPressed = transparentToggle.getAttribute('aria-pressed') === 'true';
+                if (window.Chatooly && window.Chatooly.backgroundManager) {
+                    Chatooly.backgroundManager.setTransparent(isPressed);
+                }
+                if (bgColorGroup) {
+                    bgColorGroup.style.display = isPressed ? 'none' : 'block';
+                }
+                updateBackground();
+            }, 0);
         });
     }
 
@@ -1836,11 +1839,12 @@ function animate() {
         return;
     }
 
-    textData.animationTime += 0.016 * textData.animationSpeed;
+    const delta = clock.getDelta();
+    textData.animationTime += delta * textData.animationSpeed;
 
     // Update auto position if in auto mode
     if (textData.hoverEffectEnabled && textData.interactionMode === 'auto') {
-        textData.autoTime += 16;
+        textData.autoTime += delta * 1000;
         const autoPos = getAutoPosition(textData.autoTime, textData.autoPattern);
         textData.mouseX = autoPos.x;
         textData.mouseY = autoPos.y;
